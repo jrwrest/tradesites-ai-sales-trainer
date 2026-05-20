@@ -1,0 +1,35 @@
+{
+  "id": "permission-led-open",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep opens clearly, asks for permission, and starts with an energy-cost discovery question.",
+  "turns": [
+    {
+      "role": "persona",
+      "text": "Alex Morgan speaking. Who is this?"
+    },
+    {
+      "role": "user",
+      "text": "Hi Alex, James from Solar Future Scotland. Quick question, can I take 20 seconds to explain why I called about commercial solar for your sites?"
+    },
+    {
+      "role": "persona",
+      "text": "Make it quick."
+    },
+    {
+      "role": "user",
+      "text": "How are you currently looking at energy costs and site suitability for solar?"
+    }
+  ],
+  "expected": {
+    "overallScore": { "min": 4, "max": 6 },
+    "categories": {
+      "opener": { "min": 7, "max": 9 },
+      "discovery": { "min": 5, "max": 7 }
+    },
+    "assignedDrillSkill": "next_step_close",
+    "forbiddenLeakage": [
+      "hiddenContext",
+      "will shut down"
+    ]
+  }
+}

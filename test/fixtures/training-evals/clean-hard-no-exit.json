@@ -1,0 +1,35 @@
+{
+  "id": "clean-hard-no-exit",
+  "scenarioId": "commercial-solar-rejection",
+  "summary": "Prospect gives a hard no and the rep exits cleanly without pushing.",
+  "turns": [
+    {
+      "role": "persona",
+      "text": "Alex Morgan speaking. Who is this?"
+    },
+    {
+      "role": "user",
+      "text": "James from Solar Future Scotland. Can I take 20 seconds?"
+    },
+    {
+      "role": "persona",
+      "text": "We have no requirement for this. Please take us off your call list."
+    },
+    {
+      "role": "user",
+      "text": "Understood, I will not push it. Thanks for taking the call. Bye."
+    }
+  ],
+  "expected": {
+    "overallScore": { "min": 4, "max": 6 },
+    "categories": {
+      "objectionHandling": { "min": 4, "max": 6 },
+      "close": { "min": 8, "max": 10 }
+    },
+    "assignedDrillSkill": "discovery_question_quality",
+    "forbiddenLeakage": [
+      "hiddenContext",
+      "may only continue"
+    ]
+  }
+}

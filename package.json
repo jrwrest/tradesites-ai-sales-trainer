@@ -1,0 +1,32 @@
+{
+  "name": "tradesites-ai-sales-trainer",
+  "version": "1.0.0",
+  "description": "Free open-source AI sales trainer for contractors winning bigger commercial jobs.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "eval:fixtures": "node scripts/evaluate-fixtures.js",
+    "pb:start": "./pocketbase serve --http 127.0.0.1:8090",
+    "validate:auth": "node scripts/validate-pocketbase-login.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "node --test"
+  },
+  "keywords": [
+    "sales-training",
+    "cold-calling",
+    "contractors",
+    "commercial-solar",
+    "roleplay"
+  ],
+  "author": "James R Wrest",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

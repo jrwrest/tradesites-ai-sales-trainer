@@ -1,0 +1,61 @@
+{
+  "id": "sample-foods-hard-no-failed-context",
+  "scenarioId": "commercial-solar-rejection",
+  "summary": "Synthetic food distributor rejection where the rep loses context and pushes after a hard no.",
+  "turns": [
+    {
+      "role": "persona",
+      "speaker": "Northbridge Foods",
+      "text": "Hi. Hello, Northbridge. Who's calling, please?",
+      "at": "00:00"
+    },
+    {
+      "role": "user",
+      "speaker": "Alex Morgan",
+      "text": "Hi. Can I speak with Peter Morgan? This is Alex. I've been trying to reach him by email. Do you know when he's back or available?",
+      "at": "00:03"
+    },
+    {
+      "role": "persona",
+      "speaker": "Northbridge Foods",
+      "text": "You talked about email, did you say? About what? Sorry. Oh, with no interest. I mean, no requirement for it, but I'm the managing director, so you can take us off your call list.",
+      "at": "00:15"
+    },
+    {
+      "role": "user",
+      "speaker": "Alex Morgan",
+      "text": "That through email about some solar. About solar for the company. Do you have solar or okay. So I'm not trying to sell solar. I'm just, like, we basically have you heard of PPA?",
+      "at": "00:17"
+    },
+    {
+      "role": "persona",
+      "speaker": "Northbridge Foods",
+      "text": "As I said, you have no use for me. I have absolutely no use for it whatsoever. No. I see. You're wasting your time. Thanks for calling anyway. Cheers.",
+      "at": "00:34"
+    },
+    {
+      "role": "user",
+      "speaker": "Alex Morgan",
+      "text": "Okay. Thanks. Bye.",
+      "at": "00:46"
+    },
+    {
+      "role": "persona",
+      "speaker": "Northbridge Foods",
+      "text": "Bye. Bye.",
+      "at": "00:47"
+    }
+  ],
+  "expected": {
+    "overallScore": { "min": 1, "max": 5 },
+    "categories": {
+      "objectionHandling": { "min": 1, "max": 3 },
+      "close": { "min": 1, "max": 3 }
+    },
+    "assignedDrillSkill": "hard_no_clean_exit",
+    "forbiddenLeakage": [
+      "hiddenContext",
+      "may only continue"
+    ]
+  }
+}

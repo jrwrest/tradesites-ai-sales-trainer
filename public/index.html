@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tradesites AI Sales Trainer</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section class="auth-gate" id="authGate" aria-labelledby="authTitle">
+      <div class="auth-card">
+        <h1 id="authTitle">Tradesites AI Sales Trainer</h1>
+        <p id="authStatus">Log in to use the trainer.</p>
+        <form class="auth-panel" id="authForm">
+          <div class="auth-user" id="authUser">Checking user...</div>
+          <input id="authEmail" type="email" autocomplete="email" placeholder="Email" />
+          <input id="authPassword" type="password" autocomplete="current-password" placeholder="Password" />
+          <button id="loginBtn" type="submit">Log In</button>
+          <button id="signupBtn" type="button" class="secondary">Create Account</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="app hidden" id="appShell">
+      <section class="call-panel" aria-labelledby="app-title">
+        <div class="topbar">
+          <div>
+            <h1 id="app-title">Tradesites AI Sales Trainer</h1>
+            <p id="statusText">Choose a scenario and start a training call.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="account-user" id="accountUser"></div>
+            <button id="logoutBtn" type="button" class="secondary">Log Out</button>
+            <div class="timer" id="timer">00:00</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <label class="field">
+            <span>Scenario</span>
+            <select id="scenarioSelect" disabled></select>
+          </label>
+          <button id="startBtn" type="button" disabled>Start Call</button>
+          <button id="gauntletBtn" type="button" disabled>Gauntlet</button>
+          <button id="micBtn" type="button" disabled>Mic</button>
+          <button id="endBtn" type="button" disabled>End Call</button>
+        </div>
+
+        <div class="support" id="supportText"></div>
+
+        <section class="due-drill hidden" id="dueDrill" aria-live="polite"></section>
+
+        <section class="scenario" id="scenarioCard" aria-live="polite"></section>
+
+        <section class="transcript" aria-label="Call transcript">
+          <div id="transcript"></div>
+        </section>
+
+        <form class="composer" id="messageForm">
+          <input
+            id="messageInput"
+            autocomplete="off"
+            placeholder="Type what you would say on the call..."
+            disabled
+          />
+          <button id="sendBtn" type="submit" disabled>Send</button>
+        </form>
+      </section>
+
+      <aside class="score-panel" aria-label="Call score">
+        <div class="aside-heading">
+          <h2 id="asideTitle">Coach</h2>
+          <div class="aside-actions">
+            <button id="profileBtn" type="button" disabled>Profile</button>
+            <button id="reviewBtn" type="button" disabled>Review</button>
+            <button id="coachBtn" type="button" disabled>Help</button>
+          </div>
+        </div>
+        <div id="coachEmpty">Start a call, then ask for help when you hit resistance.</div>
+        <div id="coachCard" class="hidden"></div>
+        <div id="scoreEmpty">End a call to see score feedback.</div>
+        <div id="scoreCard" class="hidden"></div>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

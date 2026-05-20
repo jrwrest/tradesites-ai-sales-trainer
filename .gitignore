@@ -1,0 +1,15 @@
+node_modules/
+data/*.json
+data/*.tmp
+data/sessions/*.json
+data/**/*.tmp
+data/profiles/*.json
+data/review-queue/*.json
+data/smoke-artifacts/
+pb_data/
+pb_backups/
+pocketbase
+.DS_Store
+.env
+*.log
+.playwright-cli/
