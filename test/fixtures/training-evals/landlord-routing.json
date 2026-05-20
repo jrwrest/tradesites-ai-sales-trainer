@@ -1,0 +1,36 @@
+{
+  "id": "landlord-routing",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Prospect says the business does not own the building and the rep misses the landlord-routing move.",
+  "turns": [
+    {
+      "role": "persona",
+      "text": "Alex Morgan speaking. Who is this?"
+    },
+    {
+      "role": "user",
+      "text": "James from Solar Future Scotland. Quick question on solar for larger sites."
+    },
+    {
+      "role": "persona",
+      "text": "We do not own the building."
+    },
+    {
+      "role": "user",
+      "text": "No problem. We can usually still offer funded solar options if the roof looks suitable."
+    }
+  ],
+  "expected": {
+    "overallScore": { "min": 4, "max": 6 },
+    "categories": {
+      "opener": { "min": 6, "max": 8 },
+      "objectionHandling": { "min": 3, "max": 6 },
+      "discovery": { "min": 1, "max": 5 }
+    },
+    "assignedDrillSkill": "landlord_tenant_routing",
+    "forbiddenLeakage": [
+      "respects process",
+      "internal stakeholders"
+    ]
+  }
+}

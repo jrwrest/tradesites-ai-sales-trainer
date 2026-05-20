@@ -1,0 +1,35 @@
+{
+  "id": "send-info-brush-off",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Prospect says to send information and the rep agrees without clarifying whether there is a live priority.",
+  "turns": [
+    {
+      "role": "persona",
+      "text": "Alex Morgan speaking. Who is this?"
+    },
+    {
+      "role": "user",
+      "text": "James from Solar Future Scotland. Can I take 20 seconds?"
+    },
+    {
+      "role": "persona",
+      "text": "Just send something over."
+    },
+    {
+      "role": "user",
+      "text": "Fair enough, I will email some information over."
+    }
+  ],
+  "expected": {
+    "overallScore": { "min": 4, "max": 6 },
+    "categories": {
+      "objectionHandling": { "min": 7, "max": 9 },
+      "discovery": { "min": 1, "max": 4 }
+    },
+    "assignedDrillSkill": "discovery_question_quality",
+    "forbiddenLeakage": [
+      "hiddenContext",
+      "overclaiming"
+    ]
+  }
+}
