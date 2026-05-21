@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { test, before, after } = require("node:test");
-const { createApp, validateServerConfig } = require("../src/server");
+const { createApp, validateApprovalModeConfig, validateServerConfig } = require("../src/server");
 const { updateSkillMemory } = require("../src/skillMemory");
 
 let server;
@@ -11,10 +11,18 @@ let baseUrl;
 let tempDataDir;
 let previousDataDir;
 let previousAllowRemoteUnsafe;
+let previousPublicBaseUrl;
+let previousApprovalToken;
+let previousResendApiKey;
+let previousMailFrom;
 
 before(async () => {
   previousDataDir = process.env.DATA_DIR;
   previousAllowRemoteUnsafe = process.env.ALLOW_REMOTE_UNSAFE;
+  previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+  previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  previousResendApiKey = process.env.RESEND_API_KEY;
+  previousMailFrom = process.env.MAIL_FROM;
   tempDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "tradesites-sales-trainer-test-"));
   process.env.DATA_DIR = tempDataDir;
   const app = createApp({ authRequired: false });
@@ -36,6 +44,18 @@ after(async () => {
     delete process.env.ALLOW_REMOTE_UNSAFE;
   } else {
     process.env.ALLOW_REMOTE_UNSAFE = previousAllowRemoteUnsafe;
+  }
+  for (const [name, value] of [
+    ["PUBLIC_BASE_URL", previousPublicBaseUrl],
+    ["ACCESS_APPROVAL_TOKEN", previousApprovalToken],
+    ["RESEND_API_KEY", previousResendApiKey],
+    ["MAIL_FROM", previousMailFrom],
+  ]) {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
   await fs.rm(tempDataDir, { recursive: true, force: true });
 });
@@ -75,6 +95,29 @@ test("serves public home page", async () => {
   assert.equal(app.status, 200);
   assert.match(appBody, /Tradesites AI Sales Trainer/);
   assert.match(appBody, /Create Account/);
+});
+
+test("approval mode requires public link, approval token, and email delivery config", () => {
+  delete process.env.PUBLIC_BASE_URL;
+  delete process.env.ACCESS_APPROVAL_TOKEN;
+  delete process.env.RESEND_API_KEY;
+  delete process.env.MAIL_FROM;
+
+  assert.throws(
+    () => validateApprovalModeConfig({ signupMode: "approval" }),
+    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, RESEND_API_KEY, MAIL_FROM/,
+  );
+
+  process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
+  process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
+  assert.doesNotThrow(() => validateApprovalModeConfig({
+    signupMode: "approval",
+    hasInjectedMailer: true,
+  }));
+
+  process.env.RESEND_API_KEY = "resend-secret";
+  process.env.MAIL_FROM = "Trainer <trainer@example.com>";
+  assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
 });
 
 test("typed call happy path persists turns and scores", async () => {

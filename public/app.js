@@ -570,15 +570,32 @@ async function signup() {
     return;
   }
   const email = elements.authEmail.value.trim();
-  const password = elements.authPassword.value;
-  if (!email || !password) {
-    setStatus("Email and password are required.", true);
+  if (!email) {
+    setStatus("Email is required.", true);
     return;
   }
 
   state.waiting = true;
   setButtons();
   try {
+    if (state.signupMode === "approval") {
+      const payload = await api("/api/signup-requests", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setStatus(
+        payload.status === "pending_email_verification"
+          ? "Verification email sent. Verify your email, then we will review the account."
+          : "Signup request is already in progress. Check your email for the next step.",
+      );
+      return;
+    }
+
+    const password = elements.authPassword.value;
+    if (!password) {
+      setStatus("Email and password are required.", true);
+      return;
+    }
     const payload = await api("/api/auth/signup", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -588,23 +605,7 @@ async function signup() {
     setStatus(`Account created for ${payload.user.name || payload.user.email}.`);
     await loadDueDrill();
   } catch (error) {
-    if (state.signupMode === "approval" && error.code === "access_not_approved") {
-      try {
-        const payload = await api("/api/access-requests", {
-          method: "POST",
-          body: JSON.stringify({ email }),
-        });
-        setStatus(
-          payload.created
-            ? "Account request sent. We will approve it before you can create the account."
-            : "Account request already exists. Once approved, click Create Account again with this email and password.",
-        );
-      } catch (requestError) {
-        setStatus(requestError.message, true);
-      }
-    } else {
-      setStatus(error.message, true);
-    }
+    setStatus(error.message, true);
   } finally {
     state.waiting = false;
     setButtons();

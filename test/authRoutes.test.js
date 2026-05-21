@@ -200,7 +200,7 @@ test("signup is disabled by default unless explicitly enabled", async () => {
   }
 });
 
-test("approval-mode signup requires an approved access request", async () => {
+test("approval-mode signup verifies email before Telegram approval and password setup", async () => {
   const previousSignupMode = process.env.SIGNUP_MODE;
   const previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
   const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
@@ -208,11 +208,17 @@ test("approval-mode signup requires an approved access request", async () => {
   process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
   process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
 
+  const emails = [];
   const notifications = [];
+  const createdUsers = [];
   const app = createApp({
     authRequired: true,
     authVerifier: async (token) => usersByToken[token],
-    accessRequestNotifier: async (request) => {
+    signupRequestMailer: async (message) => {
+      emails.push(message);
+      return { sent: true, channel: "test" };
+    },
+    verifiedSignupNotifier: async (request) => {
       notifications.push(request);
       return { sent: true, channel: "test" };
     },
@@ -223,7 +229,8 @@ test("approval-mode signup requires an approved access request", async () => {
       }),
       signup: async ({ email, password }) => {
         assert.equal(email, "approved@example.com");
-        assert.equal(password, "secret");
+        assert.equal(password, "secret123");
+        createdUsers.push(email);
         return {
           token: "token-approved",
           user: { id: "approved-user", email, name: email, source: "pocketbase" },
@@ -238,14 +245,14 @@ test("approval-mode signup requires an approved access request", async () => {
       assert.equal(health.body.auth.signupMode, "approval");
       assert.equal(health.body.auth.signupEnabled, true);
 
-      const deniedSignup = await request("/api/auth/signup", {
+      const blockedDirectSignup = await request("/api/auth/signup", {
         method: "POST",
         body: JSON.stringify({ email: "approved@example.com", password: "secret" }),
       });
-      assert.equal(deniedSignup.response.status, 403);
-      assert.equal(deniedSignup.body.code, "access_not_approved");
+      assert.equal(blockedDirectSignup.response.status, 403);
+      assert.equal(blockedDirectSignup.body.code, "signup_approval_required");
 
-      const requested = await request("/api/access-requests", {
+      const requested = await request("/api/signup-requests", {
         method: "POST",
         body: JSON.stringify({
           email: "approved@example.com",
@@ -254,31 +261,46 @@ test("approval-mode signup requires an approved access request", async () => {
         }),
       });
       assert.equal(requested.response.status, 202);
-      assert.equal(requested.body.status, "pending");
+      assert.equal(requested.body.status, "pending_email_verification");
+      assert.equal(emails.length, 1);
+      assert.equal(emails[0].to, "approved@example.com");
+      assert.match(emails[0].text, /verify your email/i);
+      assert.equal(notifications.length, 0);
+
+      const verificationUrl = emails[0].text.match(/https:\/\/trainer\.example\.test\/\S+/)[0];
+      const verified = await request(`${new URL(verificationUrl).pathname}${new URL(verificationUrl).search}`);
+      assert.equal(verified.response.status, 200);
       assert.equal(notifications.length, 1);
       assert.equal(notifications[0].email, "approved@example.com");
+      assert.equal(notifications[0].status, "verified_pending_approval");
+      assert.ok(notifications[0].adminApprovalToken);
 
-      const blockedApproval = await request(`/api/access-requests/${requested.body.id}/approve?token=bad`);
+      const blockedApproval = await request(`/api/signup-requests/${requested.body.id}/approve?token=bad`);
       assert.equal(blockedApproval.response.status, 403);
 
       const approved = await request(
-        `/api/access-requests/${requested.body.id}/approve?token=approval-secret`,
+        `/api/signup-requests/${requested.body.id}/approve?token=${notifications[0].adminApprovalToken}`,
       );
       assert.equal(approved.response.status, 200);
+      assert.equal(emails.length, 2);
+      assert.equal(emails[1].to, "approved@example.com");
+      assert.match(emails[1].text, /set your password/i);
 
-      const signup = await request("/api/auth/signup", {
+      const setupUrl = emails[1].text.match(/https:\/\/trainer\.example\.test\/\S+/)[0];
+      const setPassword = await request(`/api/signup-requests/${requested.body.id}/set-password`, {
         method: "POST",
-        body: JSON.stringify({ email: "approved@example.com", password: "secret" }),
+        body: JSON.stringify({ token: new URL(setupUrl).searchParams.get("token"), password: "secret123" }),
       });
-      assert.equal(signup.response.status, 201);
-      assert.equal(signup.body.user.id, "approved-user");
+      assert.equal(setPassword.response.status, 201);
+      assert.equal(setPassword.body.user.id, "approved-user");
+      assert.deepEqual(createdUsers, ["approved@example.com"]);
 
-      const secondSignup = await request("/api/auth/signup", {
+      const secondSetPassword = await request(`/api/signup-requests/${requested.body.id}/set-password`, {
         method: "POST",
-        body: JSON.stringify({ email: "approved@example.com", password: "secret" }),
+        body: JSON.stringify({ token: new URL(setupUrl).searchParams.get("token"), password: "secret123" }),
       });
-      assert.equal(secondSignup.response.status, 403);
-      assert.equal(secondSignup.body.code, "access_not_approved");
+      assert.equal(secondSetPassword.response.status, 403);
+      assert.equal(secondSetPassword.body.code, "signup_request_not_approved");
     });
   } finally {
     if (previousSignupMode === undefined) {
