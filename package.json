@@ -24,6 +24,7 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
+    "nodemailer": "^7.0.13",
     "ws": "^8.20.1"
   },
   "devDependencies": {

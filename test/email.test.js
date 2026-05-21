@@ -5,31 +5,51 @@ const { parseSender, sendEmail } = require("../src/email");
 let previousBrevoApiKey;
 let previousResendApiKey;
 let previousMailFrom;
+let previousSmtpHost;
+let previousSmtpPort;
+let previousSmtpUser;
+let previousSmtpPass;
+let previousSmtpFrom;
+let previousSmtpFromName;
 
 beforeEach(() => {
   previousBrevoApiKey = process.env.BREVO_API_KEY;
   previousResendApiKey = process.env.RESEND_API_KEY;
   previousMailFrom = process.env.MAIL_FROM;
+  previousSmtpHost = process.env.SMTP_HOST;
+  previousSmtpPort = process.env.SMTP_PORT;
+  previousSmtpUser = process.env.SMTP_USER;
+  previousSmtpPass = process.env.SMTP_PASS;
+  previousSmtpFrom = process.env.SMTP_FROM;
+  previousSmtpFromName = process.env.SMTP_FROM_NAME;
   delete process.env.BREVO_API_KEY;
   delete process.env.RESEND_API_KEY;
   delete process.env.MAIL_FROM;
+  delete process.env.SMTP_HOST;
+  delete process.env.SMTP_PORT;
+  delete process.env.SMTP_USER;
+  delete process.env.SMTP_PASS;
+  delete process.env.SMTP_FROM;
+  delete process.env.SMTP_FROM_NAME;
 });
 
 afterEach(() => {
-  if (previousBrevoApiKey === undefined) {
-    delete process.env.BREVO_API_KEY;
-  } else {
-    process.env.BREVO_API_KEY = previousBrevoApiKey;
-  }
-  if (previousResendApiKey === undefined) {
-    delete process.env.RESEND_API_KEY;
-  } else {
-    process.env.RESEND_API_KEY = previousResendApiKey;
-  }
-  if (previousMailFrom === undefined) {
-    delete process.env.MAIL_FROM;
-  } else {
-    process.env.MAIL_FROM = previousMailFrom;
+  for (const [name, value] of [
+    ["BREVO_API_KEY", previousBrevoApiKey],
+    ["RESEND_API_KEY", previousResendApiKey],
+    ["MAIL_FROM", previousMailFrom],
+    ["SMTP_HOST", previousSmtpHost],
+    ["SMTP_PORT", previousSmtpPort],
+    ["SMTP_USER", previousSmtpUser],
+    ["SMTP_PASS", previousSmtpPass],
+    ["SMTP_FROM", previousSmtpFrom],
+    ["SMTP_FROM_NAME", previousSmtpFromName],
+  ]) {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 });
 
@@ -40,7 +60,7 @@ test("sendEmail fails closed when no email provider is configured", async () => 
       subject: "Verify",
       text: "Verify link",
     }),
-    (error) => error.code === "EMAIL_DELIVERY_NOT_CONFIGURED",
+    (error) => ["EMAIL_DELIVERY_NOT_CONFIGURED", "EMAIL_FROM_REQUIRED"].includes(error.code),
   );
 });
 
@@ -74,6 +94,32 @@ test("sendEmail posts to Brevo when configured", async () => {
     textContent: "Verify link",
     htmlContent: "<p>Verify link</p>",
   });
+});
+
+test("SMTP config is valid with Brevo relay env", async () => {
+  process.env.SMTP_HOST = "smtp-relay.example.com";
+  process.env.SMTP_PORT = "587";
+  process.env.SMTP_USER = "smtp-user";
+  process.env.SMTP_PASS = "smtp-pass";
+  process.env.SMTP_FROM = "noreply@example.com";
+  process.env.SMTP_FROM_NAME = "Tradesites AI Sales Trainer";
+
+  const { validateEmailConfig } = require("../src/email");
+  assert.deepEqual(validateEmailConfig(), {
+    provider: "smtp",
+    from: "Tradesites AI Sales Trainer <noreply@example.com>",
+  });
+});
+
+test("SMTP config fails closed without SMTP credentials", async () => {
+  process.env.SMTP_HOST = "smtp-relay.example.com";
+  process.env.SMTP_FROM = "noreply@example.com";
+
+  const { validateEmailConfig } = require("../src/email");
+  assert.throws(
+    () => validateEmailConfig(),
+    (error) => error.code === "EMAIL_DELIVERY_NOT_CONFIGURED",
+  );
 });
 
 test("sendEmail posts to Resend when configured", async () => {

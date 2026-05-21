@@ -1,19 +1,37 @@
+const nodemailer = require("nodemailer");
+
 function mailFrom() {
-  return process.env.MAIL_FROM || "";
+  if (process.env.MAIL_FROM) return process.env.MAIL_FROM;
+  if (process.env.SMTP_FROM_NAME && process.env.SMTP_FROM) {
+    return `${process.env.SMTP_FROM_NAME} <${process.env.SMTP_FROM}>`;
+  }
+  return process.env.SMTP_FROM || "";
 }
 
 function validateEmailConfig() {
+  const smtpHost = process.env.SMTP_HOST;
   const brevoApiKey = process.env.BREVO_API_KEY;
   const resendApiKey = process.env.RESEND_API_KEY;
   const from = mailFrom();
-  if (!brevoApiKey && !resendApiKey) {
-    const error = new Error("BREVO_API_KEY or RESEND_API_KEY is required for email delivery");
-    error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
-    throw error;
-  }
   if (!from) {
     const error = new Error("MAIL_FROM is required for email delivery");
     error.code = "EMAIL_FROM_REQUIRED";
+    throw error;
+  }
+  if (smtpHost) {
+    const missing = [];
+    if (!process.env.SMTP_USER) missing.push("SMTP_USER");
+    if (!process.env.SMTP_PASS) missing.push("SMTP_PASS");
+    if (missing.length) {
+      const error = new Error(`${missing.join(", ")} required for SMTP email delivery`);
+      error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
+      throw error;
+    }
+    return { provider: "smtp", from };
+  }
+  if (!brevoApiKey && !resendApiKey) {
+    const error = new Error("SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY is required for email delivery");
+    error.code = "EMAIL_DELIVERY_NOT_CONFIGURED";
     throw error;
   }
   return brevoApiKey
@@ -24,8 +42,34 @@ function validateEmailConfig() {
 async function sendEmail(message, { fetchImpl = fetch } = {}) {
   const { provider, apiKey, from: configuredFrom } = validateEmailConfig();
   const from = message.from || configuredFrom;
+  if (provider === "smtp") return sendSmtpEmail({ ...message, from });
   if (provider === "brevo") return sendBrevoEmail({ ...message, from }, { apiKey, fetchImpl });
   return sendResendEmail({ ...message, from }, { apiKey, fetchImpl });
+}
+
+async function sendSmtpEmail(message) {
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: process.env.SMTP_SECURE === "true",
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+  try {
+    const info = await transporter.sendMail({
+      from: message.from,
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+      html: message.html,
+    });
+    return { sent: true, channel: "smtp", id: info.messageId };
+  } catch (error) {
+    error.code = "EMAIL_DELIVERY_FAILED";
+    throw error;
+  }
 }
 
 async function sendBrevoEmail(message, { apiKey, fetchImpl }) {
@@ -99,5 +143,6 @@ function parseSender(value) {
 module.exports = {
   parseSender,
   sendEmail,
+  sendSmtpEmail,
   validateEmailConfig,
 };

@@ -16,6 +16,10 @@ let previousApprovalToken;
 let previousBrevoApiKey;
 let previousResendApiKey;
 let previousMailFrom;
+let previousSmtpHost;
+let previousSmtpUser;
+let previousSmtpPass;
+let previousSmtpFrom;
 
 before(async () => {
   previousDataDir = process.env.DATA_DIR;
@@ -25,6 +29,10 @@ before(async () => {
   previousBrevoApiKey = process.env.BREVO_API_KEY;
   previousResendApiKey = process.env.RESEND_API_KEY;
   previousMailFrom = process.env.MAIL_FROM;
+  previousSmtpHost = process.env.SMTP_HOST;
+  previousSmtpUser = process.env.SMTP_USER;
+  previousSmtpPass = process.env.SMTP_PASS;
+  previousSmtpFrom = process.env.SMTP_FROM;
   tempDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "tradesites-sales-trainer-test-"));
   process.env.DATA_DIR = tempDataDir;
   const app = createApp({ authRequired: false });
@@ -53,6 +61,10 @@ after(async () => {
     ["BREVO_API_KEY", previousBrevoApiKey],
     ["RESEND_API_KEY", previousResendApiKey],
     ["MAIL_FROM", previousMailFrom],
+    ["SMTP_HOST", previousSmtpHost],
+    ["SMTP_USER", previousSmtpUser],
+    ["SMTP_PASS", previousSmtpPass],
+    ["SMTP_FROM", previousSmtpFrom],
   ]) {
     if (value === undefined) {
       delete process.env[name];
@@ -106,10 +118,14 @@ test("approval mode requires public link, approval token, and email delivery con
   delete process.env.BREVO_API_KEY;
   delete process.env.RESEND_API_KEY;
   delete process.env.MAIL_FROM;
+  delete process.env.SMTP_HOST;
+  delete process.env.SMTP_USER;
+  delete process.env.SMTP_PASS;
+  delete process.env.SMTP_FROM;
 
   assert.throws(
     () => validateApprovalModeConfig({ signupMode: "approval" }),
-    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, BREVO_API_KEY or RESEND_API_KEY, MAIL_FROM/,
+    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY, MAIL_FROM or SMTP_FROM/,
   );
 
   process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
@@ -119,6 +135,12 @@ test("approval mode requires public link, approval token, and email delivery con
     hasInjectedMailer: true,
   }));
 
+  process.env.SMTP_HOST = "smtp-relay.example.com";
+  process.env.SMTP_FROM = "noreply@example.com";
+  assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
+
+  delete process.env.SMTP_HOST;
+  delete process.env.SMTP_FROM;
   process.env.BREVO_API_KEY = "brevo-secret";
   process.env.MAIL_FROM = "Tradesites AI Sales Trainer <trainer@example.com>";
   assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));

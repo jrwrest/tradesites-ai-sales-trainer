@@ -81,8 +81,12 @@ PUBLIC_BASE_URL="https://trainer.example.com" \
 ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
 TELEGRAM_BOT_TOKEN="replace-with-your-bot-token" \
 TELEGRAM_CHAT_ID="replace-with-your-chat-id" \
-BREVO_API_KEY="replace-with-your-brevo-api-key" \
-MAIL_FROM="Tradesites AI Sales Trainer <trainer@example.com>" \
+SMTP_HOST="smtp-relay.brevo.com" \
+SMTP_PORT="587" \
+SMTP_USER="replace-with-your-brevo-smtp-user" \
+SMTP_PASS="replace-with-your-brevo-smtp-password" \
+SMTP_FROM="trainer@example.com" \
+SMTP_FROM_NAME="Tradesites AI Sales Trainer" \
 POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
 ```
@@ -112,9 +116,15 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `POCKETBASE_URL` | `http://127.0.0.1:8090` | PocketBase auth endpoint. |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in verification, approval, and password setup links. |
 | `ACCESS_APPROVAL_TOKEN` | empty | Required in approval mode. Server-side secret used to hash per-request admin approval tokens. |
-| `BREVO_API_KEY` | empty | Preferred provider for approval-mode signup emails. Uses Brevo transactional email API. |
+| `SMTP_HOST` | empty | Preferred email provider path. Use Brevo SMTP relay, for example `smtp-relay.brevo.com`. |
+| `SMTP_PORT` | `587` | SMTP port. |
+| `SMTP_USER` | empty | SMTP username. Required when `SMTP_HOST` is set. |
+| `SMTP_PASS` | empty | SMTP password/secret. Required when `SMTP_HOST` is set. |
+| `SMTP_FROM` | empty | Verified sender email. Required in approval mode when `MAIL_FROM` is not set. |
+| `SMTP_FROM_NAME` | empty | Optional display name used with `SMTP_FROM`. |
+| `BREVO_API_KEY` | empty | Optional Brevo transactional API provider. SMTP is preferred when available. |
 | `RESEND_API_KEY` | empty | Optional fallback provider for approval-mode signup emails. |
-| `MAIL_FROM` | empty | Required in approval mode. Must be a verified sender address in Brevo or Resend. |
+| `MAIL_FROM` | empty | Required for API providers. Can also override the SMTP sender display string. |
 | `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for verified-signup approval notifications. |
 | `TELEGRAM_CHAT_ID` | empty | Optional chat id for verified-signup approval notifications. |
 | `SIGNUP_EMAIL_TOKEN_TTL_HOURS` | `24` | Email verification link lifetime. |

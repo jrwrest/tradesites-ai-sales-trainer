@@ -27,11 +27,15 @@ ACCESS_APPROVAL_TOKEN=replace-with-a-long-random-secret
 POCKETBASE_URL=http://127.0.0.1:8090
 ```
 
-Required signup email delivery through Brevo:
+Required signup email delivery through Brevo SMTP:
 
 ```bash
-BREVO_API_KEY=replace-with-your-brevo-api-key
-MAIL_FROM="Tradesites AI Sales Trainer <trainer@example.com>"
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=replace-with-your-brevo-smtp-user
+SMTP_PASS=replace-with-your-brevo-smtp-password
+SMTP_FROM=trainer@example.com
+SMTP_FROM_NAME="Tradesites AI Sales Trainer"
 ```
 
 These are required when `SIGNUP_MODE=approval`; the app fails closed instead of logging signup links or telling users that email was sent when delivery is not configured.
