@@ -141,6 +141,29 @@ test("right-person opener is answered before relevance challenge", async () => {
   assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
 });
 
+test("best-person opener is treated as a routing question", async () => {
+  const repMessage =
+    "hey this is James I sent an email about a solar quick electricity cost check and I wonder if you're the best person to talk to about this";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-best-person-check",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.provider, "flow_guard");
+  assert.equal(reply.flowGuard, "right_person_check");
+  assert.match(reply.text, /maybe|possibly|not directly|depends|point you|what did you send|short version/i);
+  assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
+});
+
 test("right-person opener can vary the routing answer", async () => {
   const repMessage =
     "this is James regarding a quick electricity cost check, are you the right person to talk to about this?";
@@ -165,7 +188,7 @@ test("right-person opener can vary the routing answer", async () => {
   const texts = new Set(replies.map((reply) => reply.text));
 
   assert.ok(texts.size >= 3);
-  assert.ok(Array.from(texts).some((text) => /No, I do not look after/i.test(text)));
+  assert.ok(Array.from(texts).some((text) => /No, not directly/i.test(text)));
   for (const reply of replies) {
     assert.equal(reply.flowGuard, "right_person_check");
     assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
