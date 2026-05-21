@@ -11,6 +11,7 @@ const state = {
   user: null,
   authRequired: false,
   signupEnabled: false,
+  signupMode: "disabled",
 };
 
 const elements = {
@@ -22,6 +23,7 @@ const elements = {
   authEmail: document.querySelector("#authEmail"),
   authPassword: document.querySelector("#authPassword"),
   loginBtn: document.querySelector("#loginBtn"),
+  requestAccessBtn: document.querySelector("#requestAccessBtn"),
   signupBtn: document.querySelector("#signupBtn"),
   logoutBtn: document.querySelector("#logoutBtn"),
   accountUser: document.querySelector("#accountUser"),
@@ -77,6 +79,7 @@ function setButtons() {
   elements.micBtn.disabled = !hasUser || !active || !state.recognition || state.waiting;
   elements.micBtn.textContent = state.listening ? "Stop Mic" : "Mic";
   elements.loginBtn.disabled = state.waiting;
+  elements.requestAccessBtn.disabled = state.waiting;
   elements.signupBtn.disabled = state.waiting || !state.signupEnabled;
   elements.logoutBtn.disabled = state.waiting || (!state.authToken && state.user?.id === "local");
 }
@@ -131,6 +134,7 @@ function renderAuth() {
     elements.appShell.classList.add("hidden");
     elements.authUser.textContent = "Log in to use the trainer.";
     elements.loginBtn.classList.remove("hidden");
+    elements.requestAccessBtn.classList.toggle("hidden", state.signupMode !== "approval");
     elements.signupBtn.classList.toggle("hidden", !state.signupEnabled);
     elements.authEmail.classList.remove("hidden");
     elements.authPassword.classList.remove("hidden");
@@ -149,6 +153,10 @@ function renderAuth() {
       : state.user.name || state.user.email;
   elements.logoutBtn.classList.toggle("hidden", state.user.id === "local" && !state.authToken);
   elements.loginBtn.classList.toggle("hidden", state.user.id !== "local" || Boolean(state.authToken));
+  elements.requestAccessBtn.classList.toggle(
+    "hidden",
+    state.signupMode !== "approval" || state.user.id !== "local" || Boolean(state.authToken),
+  );
   elements.signupBtn.classList.toggle(
     "hidden",
     !state.signupEnabled || state.user.id !== "local" || Boolean(state.authToken),
@@ -510,6 +518,7 @@ async function loadHealth() {
   const payload = await api("/api/health");
   state.authRequired = Boolean(payload.auth?.required);
   state.signupEnabled = Boolean(payload.auth?.signupEnabled);
+  state.signupMode = payload.auth?.signupMode || "disabled";
   renderAuth();
 }
 
@@ -585,6 +594,33 @@ async function signup() {
     elements.authPassword.value = "";
     setStatus(`Account created for ${payload.user.name || payload.user.email}.`);
     await loadDueDrill();
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    state.waiting = false;
+    setButtons();
+  }
+}
+
+async function requestAccess() {
+  const email = elements.authEmail.value.trim();
+  if (!email) {
+    setStatus("Enter your email to request access.", true);
+    return;
+  }
+
+  state.waiting = true;
+  setButtons();
+  try {
+    const payload = await api("/api/access-requests", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    setStatus(
+      payload.created
+        ? "Access request sent. We will approve it before you can create an account."
+        : "Access request already exists. If approved, create your account with this email.",
+    );
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -876,6 +912,7 @@ elements.authForm.addEventListener("submit", (event) => {
   authenticate();
 });
 elements.signupBtn.addEventListener("click", signup);
+elements.requestAccessBtn.addEventListener("click", requestAccess);
 elements.logoutBtn.addEventListener("click", logout);
 elements.messageForm.addEventListener("submit", (event) => {
   event.preventDefault();

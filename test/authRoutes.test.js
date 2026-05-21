@@ -200,6 +200,105 @@ test("signup is disabled by default unless explicitly enabled", async () => {
   }
 });
 
+test("approval-mode signup requires an approved access request", async () => {
+  const previousSignupMode = process.env.SIGNUP_MODE;
+  const previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+  process.env.SIGNUP_MODE = "approval";
+  process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
+  process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
+
+  const notifications = [];
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+    accessRequestNotifier: async (request) => {
+      notifications.push(request);
+      return { sent: true, channel: "test" };
+    },
+    authClient: {
+      login: async ({ email }) => ({
+        token: `token-${email}`,
+        user: { id: `user-${email}`, email, name: email, source: "pocketbase" },
+      }),
+      signup: async ({ email, password }) => {
+        assert.equal(email, "approved@example.com");
+        assert.equal(password, "secret");
+        return {
+          token: "token-approved",
+          user: { id: "approved-user", email, name: email, source: "pocketbase" },
+        };
+      },
+    },
+  });
+
+  try {
+    await withServer(app, async (request) => {
+      const health = await request("/api/health");
+      assert.equal(health.body.auth.signupMode, "approval");
+      assert.equal(health.body.auth.signupEnabled, true);
+
+      const deniedSignup = await request("/api/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "approved@example.com", password: "secret" }),
+      });
+      assert.equal(deniedSignup.response.status, 403);
+      assert.equal(deniedSignup.body.code, "access_not_approved");
+
+      const requested = await request("/api/access-requests", {
+        method: "POST",
+        body: JSON.stringify({
+          email: "approved@example.com",
+          name: "Approved Rep",
+          company: "BrightTrade Solar",
+        }),
+      });
+      assert.equal(requested.response.status, 202);
+      assert.equal(requested.body.status, "pending");
+      assert.equal(notifications.length, 1);
+      assert.equal(notifications[0].email, "approved@example.com");
+
+      const blockedApproval = await request(`/api/access-requests/${requested.body.id}/approve?token=bad`);
+      assert.equal(blockedApproval.response.status, 403);
+
+      const approved = await request(
+        `/api/access-requests/${requested.body.id}/approve?token=approval-secret`,
+      );
+      assert.equal(approved.response.status, 200);
+
+      const signup = await request("/api/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "approved@example.com", password: "secret" }),
+      });
+      assert.equal(signup.response.status, 201);
+      assert.equal(signup.body.user.id, "approved-user");
+
+      const secondSignup = await request("/api/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({ email: "approved@example.com", password: "secret" }),
+      });
+      assert.equal(secondSignup.response.status, 403);
+      assert.equal(secondSignup.body.code, "access_not_approved");
+    });
+  } finally {
+    if (previousSignupMode === undefined) {
+      delete process.env.SIGNUP_MODE;
+    } else {
+      process.env.SIGNUP_MODE = previousSignupMode;
+    }
+    if (previousApprovalToken === undefined) {
+      delete process.env.ACCESS_APPROVAL_TOKEN;
+    } else {
+      process.env.ACCESS_APPROVAL_TOKEN = previousApprovalToken;
+    }
+    if (previousPublicBaseUrl === undefined) {
+      delete process.env.PUBLIC_BASE_URL;
+    } else {
+      process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
+    }
+  }
+});
+
 test("auth me returns the current normalized user", async () => {
   const app = createApp({
     authRequired: true,

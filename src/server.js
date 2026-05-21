@@ -12,6 +12,13 @@ const { findApprovedResponse, findApprovedResponseForDrill } = require("./approv
 const { buildCoachingSuggestion, HELP_MOVES, inferStage } = require("./objectionPlaybook");
 const { loadProfile, saveProfile } = require("./profileStore");
 const {
+  approveAccessRequest,
+  consumeApprovedAccess,
+  createAccessRequest,
+  isEmailApproved,
+  notifyAccessRequest,
+} = require("./accessRequests");
+const {
   LOCAL_USER,
   loginWithPocketBase,
   resolveRequestUser,
@@ -48,12 +55,14 @@ function sendApiError(req, res, status, code, message) {
 
 function createApp(options = {}) {
   const authRequired = options.authRequired ?? process.env.AUTH_REQUIRED !== "0";
-  const signupEnabled = options.signupEnabled ?? process.env.SIGNUP_ENABLED === "1";
+  const signupMode = options.signupMode || process.env.SIGNUP_MODE || (process.env.SIGNUP_ENABLED === "1" ? "open" : "disabled");
+  const signupEnabled = options.signupEnabled ?? ["open", "approval"].includes(signupMode);
   const verifyToken = options.authVerifier || verifyPocketBaseToken;
   const authClient = options.authClient || {
     login: loginWithPocketBase,
     signup: signupWithPocketBase,
   };
+  const accessRequestNotifier = options.accessRequestNotifier || notifyAccessRequest;
   const authAttempts = new Map();
   const app = express();
   const publicDir = path.join(__dirname, "..", "public");
@@ -84,6 +93,7 @@ function createApp(options = {}) {
       auth: {
         required: authRequired,
         signupEnabled,
+        signupMode,
       },
     });
   });
@@ -144,10 +154,51 @@ function createApp(options = {}) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
+      if (signupMode === "approval" && !(await isEmailApproved(email))) {
+        sendApiError(req, res, 403, "access_not_approved", "Access request has not been approved yet");
+        return;
+      }
       const auth = await authClient.signup({ email, password, name });
+      if (signupMode === "approval") await consumeApprovedAccess(email);
       res.status(201).json(auth);
     } catch (error) {
       error.code = error.status && error.status < 500 ? "AUTH_INVALID" : "AUTH_UNAVAILABLE";
+      next(error);
+    }
+  });
+
+  app.post("/api/access-requests", async (req, res, next) => {
+    try {
+      const { request, created } = await createAccessRequest(req.body || {});
+      if (created) await accessRequestNotifier(request);
+      res.status(202).json({
+        id: request.id,
+        status: request.status,
+        created,
+      });
+    } catch (error) {
+      if (error.code === "ACCESS_REQUEST_EMAIL_REQUIRED") {
+        sendApiError(req, res, 400, "email_required", error.message);
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.get("/api/access-requests/:id/approve", async (req, res, next) => {
+    try {
+      const expectedToken = process.env.ACCESS_APPROVAL_TOKEN || "";
+      if (!expectedToken || req.query.token !== expectedToken) {
+        res.status(403).type("text/plain").send("Invalid approval token");
+        return;
+      }
+      const request = await approveAccessRequest(req.params.id);
+      res.type("text/plain").send(`${request.email} approved. They can now create an account.`);
+    } catch (error) {
+      if (error.code === "ACCESS_REQUEST_NOT_FOUND") {
+        res.status(404).type("text/plain").send("Access request not found");
+        return;
+      }
       next(error);
     }
   });

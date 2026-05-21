@@ -8,7 +8,7 @@ These are generic self-hosting notes for Tradesites AI Sales Trainer. Keep live 
 - Run the Node app on loopback or a private container network.
 - Run PocketBase on loopback or a private container network.
 - Set `AUTH_REQUIRED=1`.
-- Set `SIGNUP_ENABLED=0` unless you intentionally want public account creation.
+- Set `SIGNUP_MODE=disabled` or `SIGNUP_MODE=approval`; use `open` only if you intentionally want public account creation.
 - Create users through your private PocketBase admin workflow.
 - Use the mock brain for public demos unless you have quotas, rate limits, and abuse monitoring around model-backed providers.
 - Store transcripts in a private `DATA_DIR` outside the git checkout.
@@ -21,7 +21,17 @@ PORT=3137
 DATA_DIR=/var/lib/tradesites-ai-sales-trainer/data
 AUTH_REQUIRED=1
 SIGNUP_ENABLED=0
+SIGNUP_MODE=approval
+PUBLIC_BASE_URL=https://trainer.example.com
+ACCESS_APPROVAL_TOKEN=replace-with-a-long-random-secret
 POCKETBASE_URL=http://127.0.0.1:8090
+```
+
+Optional Telegram approval notifications:
+
+```bash
+TELEGRAM_BOT_TOKEN=replace-with-your-bot-token
+TELEGRAM_CHAT_ID=replace-with-your-chat-id
 ```
 
 Optional OpenClaw provider:

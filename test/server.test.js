@@ -55,6 +55,7 @@ test("serves scenarios and health", async () => {
   assert.equal(health.body.ok, true);
   assert.equal(health.body.auth.required, false);
   assert.equal(health.body.auth.signupEnabled, false);
+  assert.equal(health.body.auth.signupMode, "disabled");
   assert.equal(health.body.auth.pocketBaseUrl, undefined);
 
   const scenarios = await request("/api/scenarios");

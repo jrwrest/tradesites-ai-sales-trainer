@@ -73,6 +73,20 @@ For shared or public deployments, create users manually in PocketBase and disabl
 SIGNUP_ENABLED=0 POCKETBASE_URL="http://127.0.0.1:8090" npm start
 ```
 
+To let visitors request access without creating accounts immediately, use approval mode:
+
+```bash
+SIGNUP_MODE=approval \
+PUBLIC_BASE_URL="https://trainer.example.com" \
+ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
+TELEGRAM_BOT_TOKEN="replace-with-your-bot-token" \
+TELEGRAM_CHAT_ID="replace-with-your-chat-id" \
+POCKETBASE_URL="http://127.0.0.1:8090" \
+npm start
+```
+
+In approval mode, visitors submit their email from the login page. Telegram receives an approval link. After you approve the request, that email can create an account once with its own password.
+
 Validate the auth path:
 
 ```bash
@@ -91,8 +105,13 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `PORT` | `3137` | Express port. |
 | `DATA_DIR` | `data` | Local sessions, skill memory, profiles, and review queue. |
 | `AUTH_REQUIRED` | `1` | Set `0` only for a private local demo. |
+| `SIGNUP_MODE` | `disabled` | `disabled`, `approval`, or `open`. Approval mode requires admin approval before account creation. |
 | `SIGNUP_ENABLED` | `0` | Set `1` only for local signup testing or intentional public registration. |
 | `POCKETBASE_URL` | `http://127.0.0.1:8090` | PocketBase auth endpoint. |
+| `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in approval links. |
+| `ACCESS_APPROVAL_TOKEN` | empty | Required secret query token for approval links. |
+| `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for access-request approval notifications. |
+| `TELEGRAM_CHAT_ID` | empty | Optional chat id for access-request approval notifications. |
 | `OPENCLAW_GATEWAY_URL` | empty | Optional WebSocket gateway for OpenClaw-backed customer replies. |
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
 | `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. |
@@ -140,6 +159,7 @@ npm run validate:auth
 - The mock brain keeps practice local.
 - OpenClaw and command providers receive transcript context.
 - Public deployments should require auth, disable open signup, rate-limit access, and use HTTPS.
+- Approval-mode access requests are stored under `DATA_DIR` and should not be committed.
 - Health and browser error responses avoid returning internal service URLs.
 
 ## Building New Trade Packs
