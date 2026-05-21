@@ -328,6 +328,26 @@ test("energy qualification guard only responds to direct figure questions", asyn
   }
 });
 
+test("clean exit after a hard no gets a natural goodbye", async () => {
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-clean-hard-no-exit",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "James from BrightTrade Solar. Calling about commercial solar. Can I take 20 seconds?" },
+        { role: "persona", text: "We have no requirement for this. Please take us off your list." },
+        { role: "user", text: "I understand. Thanks for taking the call, I will close this off." },
+      ],
+    },
+    repMessage: "I understand. Thanks for taking the call, I will close this off.",
+  });
+
+  assert.match(reply.text, /thanks|bye|okay/i);
+  assert.doesNotMatch(reply.text, /meeting|spend time|why should I/i);
+});
+
 test("command brain parses valid JSON reply", async () => {
   process.env.CODEX_BRAIN_COMMAND = JSON.stringify([
     process.execPath,
