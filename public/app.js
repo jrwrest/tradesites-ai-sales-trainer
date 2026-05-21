@@ -76,14 +76,22 @@ function setButtons() {
   elements.sendBtn.disabled = !hasUser || !active || state.waiting;
   elements.scenarioSelect.disabled = !hasUser || active;
   elements.micBtn.disabled = !hasUser || !active || !state.recognition || state.waiting;
-  elements.micBtn.textContent = state.listening ? "Stop Mic" : "Mic";
+  elements.micBtn.classList.toggle("listening", state.listening);
+  elements.micBtn.setAttribute("aria-label", state.listening ? "Stop microphone" : "Start microphone");
+  elements.micBtn.title = state.listening ? "Stop microphone" : "Start microphone";
   elements.loginBtn.disabled = state.waiting;
   elements.signupBtn.disabled = state.waiting || !state.signupEnabled;
   elements.logoutBtn.disabled = state.waiting || (!state.authToken && state.user?.id === "local");
 }
 
-function clearActiveSession() {
+function stopMic({ updateButtons = true } = {}) {
   if (state.recognition && state.listening) state.recognition.stop();
+  state.listening = false;
+  if (updateButtons) setButtons();
+}
+
+function clearActiveSession() {
+  stopMic({ updateButtons: false });
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   state.session = null;
   state.startedAt = null;
@@ -788,6 +796,7 @@ async function submitMessage() {
   const text = elements.messageInput.value.trim();
   if (!text || !state.session || state.waiting) return;
 
+  stopMic({ updateButtons: false });
   state.waiting = true;
   setButtons();
   elements.messageInput.value = "";
@@ -841,7 +850,7 @@ async function submitMessage() {
 
 async function endCall() {
   if (!state.session || state.waiting) return;
-  if (state.recognition && state.listening) state.recognition.stop();
+  stopMic({ updateButtons: false });
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   state.waiting = true;
   setButtons();
@@ -864,8 +873,7 @@ async function endCall() {
 function toggleMic() {
   if (!state.recognition) return;
   if (state.listening) {
-    state.recognition.stop();
-    state.listening = false;
+    stopMic({ updateButtons: false });
   } else {
     try {
       state.recognition.start();

@@ -298,7 +298,7 @@ h2 {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 44px auto;
   gap: 10px;
   margin-top: 12px;
 }
@@ -306,6 +306,20 @@ h2 {
 .composer input {
   min-height: 42px;
   padding: 0 12px;
+}
+
+.icon-button {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 18px;
+}
+
+.icon-button.listening {
+  background: #b42318;
+  border-color: #b42318;
 }
 
 .score-grid {
