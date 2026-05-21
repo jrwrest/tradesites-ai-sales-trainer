@@ -81,11 +81,11 @@ function buildConversationFlowGuard({ scenario, session, repMessage }) {
 function asksForEnergyUsageFigure(text = "") {
   const normalized = String(text || "");
   const hasEnergyTopic = /\b(electric|electrical|electricity|energy|power|utility)\b/i.test(normalized);
-  const hasUsageMetric = /\b(bill|spend|cost|usage|kwh|kilowatt|annual|yearly|monthly|quarterly|figure|amount)\b/i.test(
+  const hasUsageMetric = /\b(bill|spend|cost|usage|kwh|kilowatt|annual|yearly|monthly|quarterly|amount)\b/i.test(
     normalized,
   );
   const asksForFigure =
-    /\b(how much|what(?:'s| is| are)|roughly|approximately|estimate|estimated|ballpark|exact|figure|amount)\b/i.test(
+    /\b(how much|what(?:'s| is| are)|roughly|approximately|estimate|estimated|ballpark|exact\s+figure|amount)\b/i.test(
       normalized,
     ) ||
     /\b(can|could|would)\s+you\s+(?:share|tell|check|confirm|give|send)\b/i.test(normalized) ||
