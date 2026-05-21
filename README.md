@@ -85,7 +85,7 @@ POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
 ```
 
-In approval mode, visitors submit their email from the login page. Telegram receives an approval link. After you approve the request, that email can create an account once with its own password.
+In approval mode, visitors enter an email and password, then click `Create Account`. If the email is not approved yet, the app sends an approval request instead of creating the account. Telegram receives an approval link. After you approve the request, that email can click `Create Account` again to create the account with its own password.
 
 Validate the auth path:
 
