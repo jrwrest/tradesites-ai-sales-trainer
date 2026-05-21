@@ -49,7 +49,7 @@ function hasPermissionAsk(text = "") {
 }
 
 function hasRightPersonAsk(text = "") {
-  return /\b(best person|right person|best (?:one|person) to (?:speak|talk|deal) with|right (?:one|person) to (?:speak|talk|deal) with|who (?:looks after|handles|owns)|do you (?:look after|handle|own|cover)|are you (?:the )?(?:person|one)|is this (?:something )?you (?:look after|handle|own|cover))\b/i.test(
+  return /\b(best person|right person|someone better|better person|best (?:one|person) to (?:speak|talk|deal) with|right (?:one|person) to (?:speak|talk|deal) with|who (?:would be )?(?:best|better) to (?:speak|talk) (?:to|with)|who (?:looks after|handles|owns|deals with)|(?:do|would) you (?:look after|handle|own|cover|deal with)|are you (?:the )?(?:person|one)|would you be (?:the )?(?:person|one)|is this (?:something )?you (?:look after|handle|own|cover|deal with))\b/i.test(
     text,
   );
 }
@@ -116,12 +116,14 @@ function buildConversationFlowGuard({ scenario, session, repMessage }) {
 
 function asksForEnergyUsageFigure(text = "") {
   const normalized = String(text || "");
-  const hasEnergyTopic = /\b(electric|electrical|electricity|energy|power|utility)\b/i.test(normalized);
-  const hasUsageMetric = /\b(bill|spend|cost|usage|kwh|kilowatt|annual|yearly|monthly|quarterly|amount)\b/i.test(
+  const hasEnergyTopic = /\b(electric|electrical|electricity|energy|power|utility|kwh|kilowatt|daytime usage)\b/i.test(
+    normalized,
+  );
+  const hasUsageMetric = /\b(bill|spend|cost|usage|kwh|kilowatt|unit rate|rate|annual|yearly|monthly|quarterly|amount)\b/i.test(
     normalized,
   );
   const asksForFigure =
-    /\b(how much|what(?:'s| is| are)|roughly|approximately|estimate|estimated|ballpark|exact\s+figure|amount)\b/i.test(
+    /\b(how much|what(?:'s| is| are)|what do you pay|roughly|approximately|estimate|estimated|ballpark|exact\s+figure|amount)\b/i.test(
       normalized,
     ) ||
     /\b(can|could|would)\s+you\s+(?:share|tell|check|confirm|give|send)\b/i.test(normalized) ||
@@ -139,6 +141,48 @@ function buildQualificationFlowGuard({ repMessage }) {
     provider: "flow_guard",
     flowGuard: "energy_bill_qualification",
   };
+}
+
+function latestCustomerObjection(session) {
+  const customerTurns = (session.turns || []).filter((turn) => turn.role === "persona" || turn.speaker === "customer");
+  return customerTurns[customerTurns.length - 1] || null;
+}
+
+function buildObjectionFollowUpGuard({ session, repMessage }) {
+  const latestCustomerTurn = latestCustomerObjection(session);
+  if (!latestCustomerTurn?.objectionId) return null;
+
+  const text = String(repMessage || "");
+
+  if (
+    latestCustomerTurn.objectionId === "budget-free-claim" &&
+    /\b(funded|provider pays|no upfront|generated power|agreed terms|commercial model|site fit|demand)\b/i.test(text)
+  ) {
+    return {
+      text: "Okay, so what would you actually need from us to check whether it makes sense?",
+      mood: "guarded",
+      provider: "flow_guard",
+      flowGuard: "commercial_model_follow_up",
+      objectionId: latestCustomerTurn.objectionId,
+      objectionType: latestCustomerTurn.objectionType,
+    };
+  }
+
+  if (
+    latestCustomerTurn.objectionId === "landlord" &&
+    /\b(landlord|owner|short note|close (?:it|this) off|not realistic|useful)\b/i.test(text)
+  ) {
+    return {
+      text: "A short note might be okay, but I am not promising the landlord will engage with it.",
+      mood: "guarded",
+      provider: "flow_guard",
+      flowGuard: "landlord_follow_up",
+      objectionId: latestCustomerTurn.objectionId,
+      objectionType: latestCustomerTurn.objectionType,
+    };
+  }
+
+  return null;
 }
 
 function fallbackWithWarning({ scenario, session, repMessage, code }) {
@@ -397,6 +441,9 @@ async function generateCustomerReply({ scenario, session, repMessage }) {
 
   const qualificationGuard = buildQualificationFlowGuard({ repMessage });
   if (qualificationGuard) return qualificationGuard;
+
+  const objectionFollowUpGuard = buildObjectionFollowUpGuard({ session, repMessage });
+  if (objectionFollowUpGuard) return objectionFollowUpGuard;
 
   const payload = buildBrainPayload({ scenario, session, repMessage });
   const forcedObjection = payload.forcedObjection;

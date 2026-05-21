@@ -164,6 +164,33 @@ test("best-person opener is treated as a routing question", async () => {
   assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
 });
 
+test("messy routing openers are treated as right-person questions", async () => {
+  const cases = [
+    "hey Alex James here I emailed about a quick energy cost check, is there someone better I should speak to about electricity?",
+    "hi this is James, would you be the person that deals with energy contracts for the site?",
+    "I sent an email over, who would be best to talk with about site electricity costs?",
+    "do you deal with energy or facility decisions there, or is that someone else?",
+  ];
+
+  for (const repMessage of cases) {
+    const reply = await generateCustomerReply({
+      scenario: enterpriseScenario,
+      session: {
+        id: `enterprise-messy-routing-${repMessage.length}`,
+        scenarioId: enterpriseScenario.id,
+        turns: [
+          { role: "persona", text: enterpriseScenario.persona.openingLine },
+          { role: "user", text: repMessage },
+        ],
+      },
+      repMessage,
+    });
+
+    assert.equal(reply.flowGuard, "right_person_check", repMessage);
+    assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i, repMessage);
+  }
+});
+
 test("right-person opener can vary the routing answer", async () => {
   const repMessage =
     "this is James regarding a quick electricity cost check, are you the right person to talk to about this?";
@@ -326,6 +353,88 @@ test("energy qualification guard only responds to direct figure questions", asyn
       assert.doesNotMatch(reply.text, /exact figure|why do you need/i, message);
     }
   }
+});
+
+test("energy qualification guard handles unit-rate and daytime-usage questions", async () => {
+  const cases = ["roughly what do you pay per kWh at the moment?", "how much daytime usage does the site usually have?"];
+
+  for (const repMessage of cases) {
+    const reply = await generateCustomerReply({
+      scenario: enterpriseScenario,
+      session: {
+        id: `enterprise-energy-figure-${repMessage.length}`,
+        scenarioId: enterpriseScenario.id,
+        turns: [
+          { role: "persona", text: enterpriseScenario.persona.openingLine },
+          { role: "user", text: "James from BrightTrade Solar. Calling about commercial solar. Can I take 20 seconds?" },
+          { role: "persona", text: "Okay. Keep it brief. What is the relevance to us?" },
+          { role: "user", text: repMessage },
+        ],
+      },
+      repMessage,
+    });
+
+    assert.equal(reply.flowGuard, "energy_bill_qualification", repMessage);
+    assert.match(reply.text, /exact figure|why do you need/i, repMessage);
+  }
+});
+
+test("commercial model answer stays on commercial model instead of jumping objections", async () => {
+  const repMessage =
+    "The funded route means the provider pays for the install and you buy the generated power under agreed terms; first we would only check demand and site fit.";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-commercial-model-follow-up",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: "James from BrightTrade Solar. Calling about funded commercial solar. Can I take 20 seconds?" },
+        {
+          role: "persona",
+          text: "No upfront cost usually means the catch shows up later. What is the actual commercial model?",
+          objectionId: "budget-free-claim",
+          objectionType: "commercial_risk",
+        },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.flowGuard, "commercial_model_follow_up");
+  assert.match(reply.text, /need from us|check whether/i);
+  assert.doesNotMatch(reply.text, /already have solar|energy consultant/i);
+});
+
+test("landlord answer stays on landlord route instead of jumping objections", async () => {
+  const repMessage =
+    "That makes sense. If the landlord route is not realistic, I can close it off; if it is, would a short landlord note be useful?";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-landlord-follow-up",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: "James from BrightTrade Solar. Calling about funded commercial solar. Can I take 20 seconds?" },
+        {
+          role: "persona",
+          text: "We do not own the building. The landlord would never go for it.",
+          objectionId: "landlord",
+          objectionType: "authority",
+        },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.flowGuard, "landlord_follow_up");
+  assert.match(reply.text, /short note|landlord/i);
+  assert.doesNotMatch(reply.text, /procurement|sustainability|already have solar|consultant/i);
 });
 
 test("clean exit after a hard no gets a natural goodbye", async () => {
