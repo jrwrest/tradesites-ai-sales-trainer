@@ -73,7 +73,7 @@ For shared or public deployments, create users manually in PocketBase and disabl
 SIGNUP_ENABLED=0 POCKETBASE_URL="http://127.0.0.1:8090" npm start
 ```
 
-To let visitors request access without creating accounts immediately, use approval mode:
+To let visitors request access without creating accounts immediately, use approval mode. Approval mode will not start unless public links, admin approval, and email delivery are configured:
 
 ```bash
 SIGNUP_MODE=approval \
@@ -81,11 +81,17 @@ PUBLIC_BASE_URL="https://trainer.example.com" \
 ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
 TELEGRAM_BOT_TOKEN="replace-with-your-bot-token" \
 TELEGRAM_CHAT_ID="replace-with-your-chat-id" \
+SMTP_HOST="smtp-relay.brevo.com" \
+SMTP_PORT="587" \
+SMTP_USER="replace-with-your-brevo-smtp-user" \
+SMTP_PASS="replace-with-your-brevo-smtp-password" \
+SMTP_FROM="trainer@example.com" \
+SMTP_FROM_NAME="Tradesites AI Sales Trainer" \
 POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
 ```
 
-In approval mode, visitors enter an email and password, then click `Create Account`. If the email is not approved yet, the app sends an approval request instead of creating the account. Telegram receives an approval link. After you approve the request, that email can click `Create Account` again to create the account with its own password.
+In approval mode, visitors enter only their email and click `Create Account`. The app sends a verification email. After the visitor verifies their email, Telegram receives an approval link. When you approve it, the app emails the visitor a password setup link. They set a password, then log in with email and password.
 
 Validate the auth path:
 
@@ -108,10 +114,23 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `SIGNUP_MODE` | `disabled` | `disabled`, `approval`, or `open`. Approval mode requires admin approval before account creation. |
 | `SIGNUP_ENABLED` | `0` | Set `1` only for local signup testing or intentional public registration. |
 | `POCKETBASE_URL` | `http://127.0.0.1:8090` | PocketBase auth endpoint. |
-| `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in approval links. |
-| `ACCESS_APPROVAL_TOKEN` | empty | Required secret query token for approval links. |
-| `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for access-request approval notifications. |
-| `TELEGRAM_CHAT_ID` | empty | Optional chat id for access-request approval notifications. |
+| `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in verification, approval, and password setup links. |
+| `ACCESS_APPROVAL_TOKEN` | empty | Required in approval mode. Server-side secret used to hash per-request admin approval tokens. |
+| `SMTP_HOST` | empty | Preferred email provider path. Use Brevo SMTP relay, for example `smtp-relay.brevo.com`. |
+| `SMTP_PORT` | `587` | SMTP port. |
+| `SMTP_USER` | empty | SMTP username. Required when `SMTP_HOST` is set. |
+| `SMTP_PASS` | empty | SMTP password/secret. Required when `SMTP_HOST` is set. |
+| `SMTP_FROM` | empty | Verified sender email. Required in approval mode when `MAIL_FROM` is not set. |
+| `SMTP_FROM_NAME` | empty | Optional display name used with `SMTP_FROM`. |
+| `BREVO_API_KEY` | empty | Optional Brevo transactional API provider. SMTP is preferred when available. |
+| `RESEND_API_KEY` | empty | Optional fallback provider for approval-mode signup emails. |
+| `MAIL_FROM` | empty | Required for API providers. Can also override the SMTP sender display string. |
+| `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for verified-signup approval notifications. |
+| `TELEGRAM_CHAT_ID` | empty | Optional chat id for verified-signup approval notifications. |
+| `SIGNUP_EMAIL_TOKEN_TTL_HOURS` | `24` | Email verification link lifetime. |
+| `SIGNUP_APPROVAL_TOKEN_TTL_HOURS` | `72` | Admin approval link lifetime. |
+| `SIGNUP_PASSWORD_TOKEN_TTL_HOURS` | `24` | Password setup link lifetime. |
+| `SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS` | `300` | Cooldown before a pending signup can resend/rotate a verification link. |
 | `OPENCLAW_GATEWAY_URL` | empty | Optional WebSocket gateway for OpenClaw-backed customer replies. |
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
 | `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. |
@@ -159,7 +178,7 @@ npm run validate:auth
 - The mock brain keeps practice local.
 - OpenClaw and command providers receive transcript context.
 - Public deployments should require auth, disable open signup, rate-limit access, and use HTTPS.
-- Approval-mode access requests are stored under `DATA_DIR` and should not be committed.
+- Approval-mode signup requests are stored under `DATA_DIR` and should not be committed.
 - Health and browser error responses avoid returning internal service URLs.
 
 ## Building New Trade Packs

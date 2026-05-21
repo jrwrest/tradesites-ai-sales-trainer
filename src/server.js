@@ -12,12 +12,15 @@ const { findApprovedResponse, findApprovedResponseForDrill } = require("./approv
 const { buildCoachingSuggestion, HELP_MOVES, inferStage } = require("./objectionPlaybook");
 const { loadProfile, saveProfile } = require("./profileStore");
 const {
-  approveAccessRequest,
-  consumeApprovedAccess,
-  createAccessRequest,
-  isEmailApproved,
-  notifyAccessRequest,
-} = require("./accessRequests");
+  approveSignupRequest,
+  buildPasswordSetupUrl,
+  buildVerificationUrl,
+  consumeSignupRequest,
+  createSignupRequest,
+  notifyVerifiedSignupRequest,
+  validatePasswordSetupToken,
+  verifySignupEmail,
+} = require("./signupRequests");
 const {
   LOCAL_USER,
   loginWithPocketBase,
@@ -25,6 +28,7 @@ const {
   signupWithPocketBase,
   verifyPocketBaseToken,
 } = require("./auth");
+const { sendEmail } = require("./email");
 
 function getBrainProvider() {
   if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
@@ -45,6 +49,24 @@ function validateServerConfig({ host = process.env.HOST || "127.0.0.1" } = {}) {
   }
 }
 
+function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = {}) {
+  if (signupMode !== "approval") return;
+  const missing = [];
+  if (!process.env.PUBLIC_BASE_URL) missing.push("PUBLIC_BASE_URL");
+  if (!process.env.ACCESS_APPROVAL_TOKEN) missing.push("ACCESS_APPROVAL_TOKEN");
+  if (!hasInjectedMailer) {
+    if (!process.env.SMTP_HOST && !process.env.BREVO_API_KEY && !process.env.RESEND_API_KEY) {
+      missing.push("SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY");
+    }
+    if (!process.env.MAIL_FROM && !process.env.SMTP_FROM) missing.push("MAIL_FROM or SMTP_FROM");
+  }
+  if (missing.length) {
+    const error = new Error(`Approval-mode signup is missing required config: ${missing.join(", ")}`);
+    error.code = "APPROVAL_MODE_CONFIG_INVALID";
+    throw error;
+  }
+}
+
 function sendApiError(req, res, status, code, message) {
   res.status(status).json({
     error: message,
@@ -62,7 +84,12 @@ function createApp(options = {}) {
     login: loginWithPocketBase,
     signup: signupWithPocketBase,
   };
-  const accessRequestNotifier = options.accessRequestNotifier || notifyAccessRequest;
+  validateApprovalModeConfig({
+    signupMode,
+    hasInjectedMailer: Boolean(options.signupRequestMailer),
+  });
+  const signupRequestMailer = options.signupRequestMailer || sendEmail;
+  const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
   const authAttempts = new Map();
   const app = express();
   const publicDir = path.join(__dirname, "..", "public");
@@ -82,6 +109,10 @@ function createApp(options = {}) {
 
   app.get(["/app", "/login", "/register"], (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
+  });
+
+  app.get("/set-password", (_req, res) => {
+    res.sendFile(path.join(publicDir, "set-password.html"));
   });
 
   app.use(express.static(publicDir, { index: false }));
@@ -115,6 +146,47 @@ function createApp(options = {}) {
     entry.count += 1;
     authAttempts.set(key, entry);
     return entry.count > maxAttempts;
+  }
+
+  async function sendVerificationEmail(request, token) {
+    const verifyUrl = buildVerificationUrl(request, token);
+    return signupRequestMailer({
+      to: request.email,
+      subject: "Verify your Tradesites AI Sales Trainer account",
+      text: [
+        "Verify your email to continue creating your Tradesites AI Sales Trainer account.",
+        "",
+        verifyUrl,
+        "",
+        "After you verify, an admin will review the request and send your password setup link.",
+      ].join("\n"),
+      html: [
+        "<p>Verify your email to continue creating your Tradesites AI Sales Trainer account.</p>",
+        `<p><a href="${verifyUrl}">Verify your email</a></p>`,
+        "<p>After you verify, an admin will review the request and send your password setup link.</p>",
+      ].join(""),
+    });
+  }
+
+  async function sendPasswordSetupEmail(request, token) {
+    const setupUrl = buildPasswordSetupUrl(request, token);
+    return signupRequestMailer({
+      to: request.email,
+      subject: "Set your Tradesites AI Sales Trainer password",
+      text: [
+        "Your Tradesites AI Sales Trainer account has been approved.",
+        "",
+        "Set your password here:",
+        setupUrl,
+        "",
+        "After setting your password, you can log in with your email and password.",
+      ].join("\n"),
+      html: [
+        "<p>Your Tradesites AI Sales Trainer account has been approved.</p>",
+        `<p><a href="${setupUrl}">Set your password</a></p>`,
+        "<p>After setting your password, you can log in with your email and password.</p>",
+      ].join(""),
+    });
   }
 
   app.post("/api/auth/login", async (req, res, next) => {
@@ -154,12 +226,17 @@ function createApp(options = {}) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
-      if (signupMode === "approval" && !(await isEmailApproved(email))) {
-        sendApiError(req, res, 403, "access_not_approved", "Access request has not been approved yet");
+      if (signupMode === "approval") {
+        sendApiError(
+          req,
+          res,
+          403,
+          "signup_approval_required",
+          "Use Create Account to verify your email and wait for approval.",
+        );
         return;
       }
       const auth = await authClient.signup({ email, password, name });
-      if (signupMode === "approval") await consumeApprovedAccess(email);
       res.status(201).json(auth);
     } catch (error) {
       error.code = error.status && error.status < 500 ? "AUTH_INVALID" : "AUTH_UNAVAILABLE";
@@ -167,38 +244,138 @@ function createApp(options = {}) {
     }
   });
 
-  app.post("/api/access-requests", async (req, res, next) => {
+  app.post("/api/signup-requests", async (req, res, next) => {
     try {
-      const { request, created } = await createAccessRequest(req.body || {});
-      if (created) await accessRequestNotifier(request);
+      if (!signupEnabled || signupMode !== "approval") {
+        sendApiError(req, res, 403, "signup_disabled", "Sign up is disabled");
+        return;
+      }
+      const email = String(req.body.email || "").trim();
+      if (email && isAuthRateLimited(req, email)) {
+        sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
+        return;
+      }
+      const { request, created, emailVerificationToken } = await createSignupRequest(req.body || {});
+      if (emailVerificationToken) await sendVerificationEmail(request, emailVerificationToken);
       res.status(202).json({
         id: request.id,
         status: request.status,
         created,
       });
     } catch (error) {
-      if (error.code === "ACCESS_REQUEST_EMAIL_REQUIRED") {
+      if (error.code === "SIGNUP_REQUEST_EMAIL_REQUIRED") {
         sendApiError(req, res, 400, "email_required", error.message);
+        return;
+      }
+      if (error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" || error.code === "EMAIL_FROM_REQUIRED") {
+        sendApiError(req, res, 503, "email_delivery_unavailable", "Email delivery is not configured.");
         return;
       }
       next(error);
     }
   });
 
-  app.get("/api/access-requests/:id/approve", async (req, res, next) => {
+  app.get("/api/signup-requests/:id/verify", async (req, res, next) => {
     try {
-      const expectedToken = process.env.ACCESS_APPROVAL_TOKEN || "";
-      if (!expectedToken || req.query.token !== expectedToken) {
+      const request = await verifySignupEmail(req.params.id, String(req.query.token || ""));
+      await verifiedSignupNotifier(request);
+      res.type("text/html").send([
+        "<!doctype html><title>Email verified</title>",
+        "<main style=\"font-family: system-ui; max-width: 680px; margin: 48px auto; line-height: 1.5;\">",
+        "<h1>Email verified</h1>",
+        "<p>Your email is verified. An admin will review the request and email you a password setup link after approval.</p>",
+        "</main>",
+      ].join(""));
+    } catch (error) {
+      if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
+        res.status(404).type("text/plain").send("Signup request not found");
+        return;
+      }
+      if (error.code === "SIGNUP_VERIFICATION_INVALID") {
+        res.status(403).type("text/plain").send("Invalid verification token");
+        return;
+      }
+      if (error.code === "SIGNUP_VERIFICATION_EXPIRED") {
+        res.status(403).type("text/plain").send("Verification token expired");
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.get("/api/signup-requests/:id/approve", async (req, res, next) => {
+    try {
+      const approvalToken = String(req.query.token || "");
+      if (!approvalToken) {
         res.status(403).type("text/plain").send("Invalid approval token");
         return;
       }
-      const request = await approveAccessRequest(req.params.id);
-      res.type("text/plain").send(`${request.email} approved. They can now create an account.`);
+      const { request, passwordSetupToken } = await approveSignupRequest(req.params.id, approvalToken);
+      await sendPasswordSetupEmail(request, passwordSetupToken);
+      res.type("text/plain").send(`${request.email} approved. Password setup email sent.`);
     } catch (error) {
-      if (error.code === "ACCESS_REQUEST_NOT_FOUND") {
-        res.status(404).type("text/plain").send("Access request not found");
+      if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
+        res.status(404).type("text/plain").send("Signup request not found");
         return;
       }
+      if (error.code === "SIGNUP_REQUEST_NOT_VERIFIED") {
+        res.status(409).type("text/plain").send("Signup request has not verified email yet");
+        return;
+      }
+      if (error.code === "SIGNUP_APPROVAL_TOKEN_INVALID") {
+        res.status(403).type("text/plain").send("Invalid approval token");
+        return;
+      }
+      if (error.code === "SIGNUP_APPROVAL_TOKEN_EXPIRED") {
+        res.status(403).type("text/plain").send("Approval token expired");
+        return;
+      }
+      if (error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" || error.code === "EMAIL_FROM_REQUIRED") {
+        res.status(503).type("text/plain").send("Email delivery is not configured");
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/signup-requests/:id/set-password", async (req, res, next) => {
+    try {
+      if (!signupEnabled || signupMode !== "approval") {
+        sendApiError(req, res, 403, "signup_disabled", "Sign up is disabled");
+        return;
+      }
+      const token = String(req.body.token || "");
+      const password = String(req.body.password || "");
+      if (!token || !password) {
+        sendApiError(req, res, 400, "credentials_required", "Password setup token and password are required");
+        return;
+      }
+      if (password.length < 8) {
+        sendApiError(req, res, 400, "password_too_short", "Password must be at least 8 characters");
+        return;
+      }
+      const request = await validatePasswordSetupToken(req.params.id, token);
+      if (isAuthRateLimited(req, request.email)) {
+        sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
+        return;
+      }
+      const auth = await authClient.signup({ email: request.email, password, name: request.name });
+      await consumeSignupRequest(request.id);
+      res.status(201).json(auth);
+    } catch (error) {
+      if (error.code === "SIGNUP_REQUEST_NOT_APPROVED") {
+        sendApiError(req, res, 403, "signup_request_not_approved", "Signup request is not approved");
+        return;
+      }
+      if (error.code === "SIGNUP_PASSWORD_TOKEN_INVALID") {
+        sendApiError(req, res, 403, "signup_password_token_invalid", "Invalid password setup token");
+        return;
+      }
+      if (error.code === "SIGNUP_PASSWORD_TOKEN_EXPIRED") {
+        sendApiError(req, res, 403, "signup_password_token_expired", "Password setup token expired");
+        return;
+      }
+      error.code = error.status && error.status < 500 ? "AUTH_INVALID" : error.code;
       next(error);
     }
   });
@@ -684,5 +861,6 @@ module.exports = {
   createApp,
   getBrainProvider,
   start,
+  validateApprovalModeConfig,
   validateServerConfig,
 };

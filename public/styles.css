@@ -456,6 +456,18 @@ h2 {
   color: var(--danger);
 }
 
+.secondary-link {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.secondary-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
 @media (max-width: 860px) {
   .app {
     grid-template-columns: 1fr;

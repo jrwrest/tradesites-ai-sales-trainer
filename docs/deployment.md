@@ -9,7 +9,7 @@ These are generic self-hosting notes for Tradesites AI Sales Trainer. Keep live 
 - Run PocketBase on loopback or a private container network.
 - Set `AUTH_REQUIRED=1`.
 - Set `SIGNUP_MODE=disabled` or `SIGNUP_MODE=approval`; use `open` only if you intentionally want public account creation.
-- Create users through your private PocketBase admin workflow.
+- For controlled public access, use approval mode so visitors verify email first, then admins approve from Telegram, then the app sends a password setup link.
 - Use the mock brain for public demos unless you have quotas, rate limits, and abuse monitoring around model-backed providers.
 - Store transcripts in a private `DATA_DIR` outside the git checkout.
 
@@ -25,6 +25,28 @@ SIGNUP_MODE=approval
 PUBLIC_BASE_URL=https://trainer.example.com
 ACCESS_APPROVAL_TOKEN=replace-with-a-long-random-secret
 POCKETBASE_URL=http://127.0.0.1:8090
+```
+
+Required signup email delivery through Brevo SMTP:
+
+```bash
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=replace-with-your-brevo-smtp-user
+SMTP_PASS=replace-with-your-brevo-smtp-password
+SMTP_FROM=trainer@example.com
+SMTP_FROM_NAME="Tradesites AI Sales Trainer"
+```
+
+These are required when `SIGNUP_MODE=approval`; the app fails closed instead of logging signup links or telling users that email was sent when delivery is not configured.
+
+Optional signup link lifetimes:
+
+```bash
+SIGNUP_EMAIL_TOKEN_TTL_HOURS=24
+SIGNUP_APPROVAL_TOKEN_TTL_HOURS=72
+SIGNUP_PASSWORD_TOKEN_TTL_HOURS=24
+SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS=300
 ```
 
 Optional Telegram approval notifications:
@@ -56,7 +78,8 @@ Expected shape:
   "brain": "mock",
   "auth": {
     "required": true,
-    "signupEnabled": false
+    "signupEnabled": true,
+    "signupMode": "approval"
   }
 }
 ```
@@ -65,7 +88,7 @@ Expected shape:
 
 - [ ] No real transcripts or customer names are committed.
 - [ ] `.env`, PocketBase data, transcript data, and logs are outside git.
-- [ ] Public signup is disabled for shared deployments.
+- [ ] Public signup is disabled or approval-mode email verification is enabled for shared deployments.
 - [ ] Provider tokens are stored outside the repo and rotated if exposed.
 - [ ] Reverse proxy terminates HTTPS.
 - [ ] Auth and app logs do not include passwords or bearer tokens.
