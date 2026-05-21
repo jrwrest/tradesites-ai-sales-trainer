@@ -55,7 +55,9 @@ function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = 
   if (!process.env.PUBLIC_BASE_URL) missing.push("PUBLIC_BASE_URL");
   if (!process.env.ACCESS_APPROVAL_TOKEN) missing.push("ACCESS_APPROVAL_TOKEN");
   if (!hasInjectedMailer) {
-    if (!process.env.RESEND_API_KEY) missing.push("RESEND_API_KEY");
+    if (!process.env.BREVO_API_KEY && !process.env.RESEND_API_KEY) {
+      missing.push("BREVO_API_KEY or RESEND_API_KEY");
+    }
     if (!process.env.MAIL_FROM) missing.push("MAIL_FROM");
   }
   if (missing.length) {

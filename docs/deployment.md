@@ -27,10 +27,10 @@ ACCESS_APPROVAL_TOKEN=replace-with-a-long-random-secret
 POCKETBASE_URL=http://127.0.0.1:8090
 ```
 
-Required signup email delivery through Resend:
+Required signup email delivery through Brevo:
 
 ```bash
-RESEND_API_KEY=replace-with-your-resend-key
+BREVO_API_KEY=replace-with-your-brevo-api-key
 MAIL_FROM="Tradesites AI Sales Trainer <trainer@example.com>"
 ```
 

@@ -81,7 +81,7 @@ PUBLIC_BASE_URL="https://trainer.example.com" \
 ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
 TELEGRAM_BOT_TOKEN="replace-with-your-bot-token" \
 TELEGRAM_CHAT_ID="replace-with-your-chat-id" \
-RESEND_API_KEY="replace-with-your-resend-key" \
+BREVO_API_KEY="replace-with-your-brevo-api-key" \
 MAIL_FROM="Tradesites AI Sales Trainer <trainer@example.com>" \
 POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
@@ -112,8 +112,9 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `POCKETBASE_URL` | `http://127.0.0.1:8090` | PocketBase auth endpoint. |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in verification, approval, and password setup links. |
 | `ACCESS_APPROVAL_TOKEN` | empty | Required in approval mode. Server-side secret used to hash per-request admin approval tokens. |
-| `RESEND_API_KEY` | empty | Required in approval mode. Sends signup verification and password setup email through Resend. |
-| `MAIL_FROM` | empty | Required in approval mode. Must be a verified sender address in Resend. |
+| `BREVO_API_KEY` | empty | Preferred provider for approval-mode signup emails. Uses Brevo transactional email API. |
+| `RESEND_API_KEY` | empty | Optional fallback provider for approval-mode signup emails. |
+| `MAIL_FROM` | empty | Required in approval mode. Must be a verified sender address in Brevo or Resend. |
 | `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for verified-signup approval notifications. |
 | `TELEGRAM_CHAT_ID` | empty | Optional chat id for verified-signup approval notifications. |
 | `SIGNUP_EMAIL_TOKEN_TTL_HOURS` | `24` | Email verification link lifetime. |

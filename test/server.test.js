@@ -13,6 +13,7 @@ let previousDataDir;
 let previousAllowRemoteUnsafe;
 let previousPublicBaseUrl;
 let previousApprovalToken;
+let previousBrevoApiKey;
 let previousResendApiKey;
 let previousMailFrom;
 
@@ -21,6 +22,7 @@ before(async () => {
   previousAllowRemoteUnsafe = process.env.ALLOW_REMOTE_UNSAFE;
   previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
   previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  previousBrevoApiKey = process.env.BREVO_API_KEY;
   previousResendApiKey = process.env.RESEND_API_KEY;
   previousMailFrom = process.env.MAIL_FROM;
   tempDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "tradesites-sales-trainer-test-"));
@@ -48,6 +50,7 @@ after(async () => {
   for (const [name, value] of [
     ["PUBLIC_BASE_URL", previousPublicBaseUrl],
     ["ACCESS_APPROVAL_TOKEN", previousApprovalToken],
+    ["BREVO_API_KEY", previousBrevoApiKey],
     ["RESEND_API_KEY", previousResendApiKey],
     ["MAIL_FROM", previousMailFrom],
   ]) {
@@ -100,12 +103,13 @@ test("serves public home page", async () => {
 test("approval mode requires public link, approval token, and email delivery config", () => {
   delete process.env.PUBLIC_BASE_URL;
   delete process.env.ACCESS_APPROVAL_TOKEN;
+  delete process.env.BREVO_API_KEY;
   delete process.env.RESEND_API_KEY;
   delete process.env.MAIL_FROM;
 
   assert.throws(
     () => validateApprovalModeConfig({ signupMode: "approval" }),
-    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, RESEND_API_KEY, MAIL_FROM/,
+    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, BREVO_API_KEY or RESEND_API_KEY, MAIL_FROM/,
   );
 
   process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
@@ -115,8 +119,12 @@ test("approval mode requires public link, approval token, and email delivery con
     hasInjectedMailer: true,
   }));
 
+  process.env.BREVO_API_KEY = "brevo-secret";
+  process.env.MAIL_FROM = "Tradesites AI Sales Trainer <trainer@example.com>";
+  assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
+
+  delete process.env.BREVO_API_KEY;
   process.env.RESEND_API_KEY = "resend-secret";
-  process.env.MAIL_FROM = "Trainer <trainer@example.com>";
   assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
 });
 
