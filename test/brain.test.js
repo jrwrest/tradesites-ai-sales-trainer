@@ -170,6 +170,87 @@ test("commercial model explanation does not trigger energy bill qualification an
   assert.doesNotMatch(reply.text, /exact figure|why do you need/i);
 });
 
+test("qualification pitch using figure out does not trigger energy bill qualification answer", async () => {
+  const repMessage =
+    "so if we can imagine ask you a few questions over the next couple minutes we will be able to figure out whether you qualify for a solo install which is completely funded and you would then be charge electricity so at a cheaper rate than what you're paying now";
+
+  const reply = await generateCustomerReply({
+    scenario,
+    session: {
+      id: "sarah-figure-out-pitch",
+      scenarioId: scenario.id,
+      turns: [
+        { role: "persona", text: "Hi, Sarah speaking. Who is this?" },
+        {
+          role: "user",
+          text: "hi Sarah this is James I emailed about electricity cost a electricity cost check and I just wanted to check whether you're the right person for a site electricity facility or energy decisions does that make sense",
+        },
+        { role: "persona", text: "Okay. Keep it brief. What is the relevance to us?" },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.notEqual(reply.flowGuard, "energy_bill_qualification");
+  assert.doesNotMatch(reply.text, /exact figure|why do you need/i);
+});
+
+test("energy qualification guard only responds to direct figure questions", async () => {
+  const cases = [
+    {
+      message: "roughly what do you spend on electricity each year?",
+      shouldTrigger: true,
+    },
+    {
+      message: "can you share your annual electricity usage?",
+      shouldTrigger: true,
+    },
+    {
+      message: "do you know your monthly energy cost?",
+      shouldTrigger: true,
+    },
+    {
+      message: "we can check whether your electricity cost could be reduced",
+      shouldTrigger: false,
+    },
+    {
+      message: "this would be at a cheaper rate than what you're paying now",
+      shouldTrigger: false,
+    },
+    {
+      message: "I emailed about an electricity cost check and wanted to see if you handle site energy decisions",
+      shouldTrigger: false,
+    },
+    {
+      message: "the first step is seeing whether the site qualifies for a funded solar install",
+      shouldTrigger: false,
+    },
+  ];
+
+  for (const { message, shouldTrigger } of cases) {
+    const reply = await generateCustomerReply({
+      scenario,
+      session: {
+        id: `energy-guard-${shouldTrigger ? "trigger" : "bypass"}-${message.length}`,
+        scenarioId: scenario.id,
+        turns: [
+          { role: "persona", text: "Okay. Keep it brief. What is the relevance to us?" },
+          { role: "user", text: message },
+        ],
+      },
+      repMessage: message,
+    });
+
+    if (shouldTrigger) {
+      assert.equal(reply.flowGuard, "energy_bill_qualification", message);
+    } else {
+      assert.notEqual(reply.flowGuard, "energy_bill_qualification", message);
+      assert.doesNotMatch(reply.text, /exact figure|why do you need/i, message);
+    }
+  }
+});
+
 test("command brain parses valid JSON reply", async () => {
   process.env.CODEX_BRAIN_COMMAND = JSON.stringify([
     process.execPath,
