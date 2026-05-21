@@ -140,6 +140,36 @@ test("energy bill qualifying question receives a relevant customer answer", asyn
   assert.doesNotMatch(reply.text, /vague marketing pitch/i);
 });
 
+test("commercial model explanation does not trigger energy bill qualification answer", async () => {
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-commercial-model-explanation",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        {
+          role: "user",
+          text: "James from BrightTrade Solar. Calling about funded commercial solar. Can I take 20 seconds?",
+        },
+        {
+          role: "persona",
+          text: "No upfront cost usually means the catch shows up later. What is the actual commercial model?",
+        },
+        {
+          role: "user",
+          text: "There is no upfront cost if we can validate you have usage for it. You would pay cheaper electricity through the funded route.",
+        },
+      ],
+    },
+    repMessage:
+      "There is no upfront cost if we can validate you have usage for it. You would pay cheaper electricity through the funded route.",
+  });
+
+  assert.notEqual(reply.flowGuard, "energy_bill_qualification");
+  assert.doesNotMatch(reply.text, /exact figure|why do you need/i);
+});
+
 test("command brain parses valid JSON reply", async () => {
   process.env.CODEX_BRAIN_COMMAND = JSON.stringify([
     process.execPath,

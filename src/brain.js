@@ -78,9 +78,24 @@ function buildConversationFlowGuard({ scenario, session, repMessage }) {
   return null;
 }
 
+function asksForEnergyUsageFigure(text = "") {
+  const normalized = String(text || "");
+  const hasEnergyTopic = /\b(electric|electrical|electricity|energy|power|utility)\b/i.test(normalized);
+  const hasUsageMetric = /\b(bill|spend|cost|usage|kwh|kilowatt|annual|yearly|monthly|quarterly|figure|amount)\b/i.test(
+    normalized,
+  );
+  const asksForFigure =
+    /\b(how much|what(?:'s| is| are)|roughly|approximately|estimate|estimated|ballpark|exact|figure|amount)\b/i.test(
+      normalized,
+    ) ||
+    /\b(can|could|would)\s+you\s+(?:share|tell|check|confirm|give|send)\b/i.test(normalized) ||
+    /\bdo\s+you\s+(?:know|have)\b/i.test(normalized);
+
+  return hasEnergyTopic && hasUsageMetric && asksForFigure;
+}
+
 function buildQualificationFlowGuard({ repMessage }) {
-  if (!/\b(electric|electrical|electricity|energy|power|utility)\b/i.test(repMessage)) return null;
-  if (!/\b(bill|spend|cost|usage|use|kwh|kilowatt|annual|yearly|monthly|quarterly)\b/i.test(repMessage)) return null;
+  if (!asksForEnergyUsageFigure(repMessage)) return null;
 
   return {
     text: "I would need to check the exact figure. It is a fair bit, but why do you need that?",
@@ -102,7 +117,7 @@ function buildBrainPayload({ scenario, session, repMessage }) {
   const objection = selectNextObjection({ scenario, session, repMessage });
   return {
     instruction:
-      "Reply only as the customer in a realistic cold-call training roleplay. Keep the response spoken, short, and in character. Follow the transcript's immediate conversational state. If the rep has not explained who they are with and why they are calling, ask for that context instead of introducing a later objection. Do not reveal that you are an AI. If forcedObjection is present, your reply must express that objection and must not introduce a different company, industry, or objection.",
+      "Reply only as the customer in a realistic cold-call training roleplay. Keep the response spoken, short, and in character. Follow the transcript's immediate conversational state. Do not answer or volunteer discovery facts unless the latest rep message actually asked for that topic. If the latest rep message is a vague explanation, challenge or clarify that explanation instead of answering an unasked question. If the rep has not explained who they are with and why they are calling, ask for that context instead of introducing a later objection. Do not reveal that you are an AI. If forcedObjection is present, your reply must express that objection and must not introduce a different company, industry, or objection.",
     scenario,
     sessionId: session.id,
     transcript: session.turns,
