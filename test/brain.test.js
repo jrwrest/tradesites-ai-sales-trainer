@@ -118,6 +118,30 @@ test("enterprise mock brain can move to permission objection after call context 
   assert.notEqual(reply.objectionId, "gatekeeper-who-is-this");
 });
 
+test("right-person opener is answered before relevance challenge", async () => {
+  const repMessage =
+    "hey Alex this is James I just called about an email showed across and regarding a quick electricity cost check are you the right person to talk to about this";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-right-person-check",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.provider, "flow_guard");
+  assert.equal(reply.flowGuard, "right_person_check");
+  assert.match(reply.text, /involved|look after|handle/i);
+  assert.match(reply.text, /relevance|about/i);
+  assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
+});
+
 test("energy bill qualifying question receives a relevant customer answer", async () => {
   const reply = await generateCustomerReply({
     scenario: hardRejectionScenario,
