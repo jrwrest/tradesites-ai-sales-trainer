@@ -41,6 +41,34 @@ async function main() {
       }),
       "Trainer login",
     );
+  } else if (trainerHealth.auth.signupMode === "approval") {
+    const deniedSignup = await fetch(`${trainerUrl}/api/auth/signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const deniedBody = await readJson(deniedSignup);
+    if (deniedSignup.status !== 403 || deniedBody.code !== "access_not_approved") {
+      throw new Error(
+        `Expected unapproved signup to be blocked; got ${deniedSignup.status} ${JSON.stringify(deniedBody)}`,
+      );
+    }
+
+    const requested = await assertOk(
+      await fetch(`${trainerUrl}/api/access-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name: "Validator Rep" }),
+      }),
+      "Trainer access request",
+    );
+    if (!requested.id || requested.status !== "pending") {
+      throw new Error(`Access request returned an invalid payload: ${JSON.stringify(requested)}`);
+    }
+    console.log(
+      `Trainer auth validation passed: approval mode blocks signup and accepts access request ${requested.id}.`,
+    );
+    return;
   } else if (trainerHealth.auth.signupEnabled) {
     auth = await assertOk(
       await fetch(`${trainerUrl}/api/auth/signup`, {
