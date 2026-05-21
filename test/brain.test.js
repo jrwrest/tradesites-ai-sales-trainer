@@ -137,9 +137,39 @@ test("right-person opener is answered before relevance challenge", async () => {
 
   assert.equal(reply.provider, "flow_guard");
   assert.equal(reply.flowGuard, "right_person_check");
-  assert.match(reply.text, /involved|look after|handle/i);
-  assert.match(reply.text, /relevance|about/i);
+  assert.match(reply.text, /involved|look after|depends|possibly|relevance|about|short version|point you/i);
   assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
+});
+
+test("right-person opener can vary the routing answer", async () => {
+  const repMessage =
+    "this is James regarding a quick electricity cost check, are you the right person to talk to about this?";
+
+  const replies = await Promise.all(
+    Array.from({ length: 12 }, (_, index) =>
+      generateCustomerReply({
+        scenario: enterpriseScenario,
+        session: {
+          id: `enterprise-right-person-variant-${index}`,
+          scenarioId: enterpriseScenario.id,
+          turns: [
+            { role: "persona", text: enterpriseScenario.persona.openingLine },
+            { role: "user", text: repMessage },
+          ],
+        },
+        repMessage,
+      }),
+    ),
+  );
+
+  const texts = new Set(replies.map((reply) => reply.text));
+
+  assert.ok(texts.size >= 3);
+  assert.ok(Array.from(texts).some((text) => /No, I do not look after/i.test(text)));
+  for (const reply of replies) {
+    assert.equal(reply.flowGuard, "right_person_check");
+    assert.doesNotMatch(reply.text, /^Okay\. Keep it brief\./i);
+  }
 });
 
 test("energy bill qualifying question receives a relevant customer answer", async () => {

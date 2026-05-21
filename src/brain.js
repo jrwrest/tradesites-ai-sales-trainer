@@ -10,8 +10,23 @@ const FALLBACKS = [
   "Send me something over and I will look at it.",
 ];
 
+const RIGHT_PERSON_REPLIES = [
+  "I am involved in those decisions, but what is the actual relevance to us?",
+  "No, I do not look after that directly. What exactly is this about?",
+  "It depends what you mean by energy decisions. Give me the short version.",
+  "Possibly, but I would need to know why this matters before I point you anywhere.",
+];
+
 function normalizeSpeech(text = "") {
   return String(text).trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function stableIndex(seedText, modulo) {
+  const hash = Array.from(String(seedText || "")).reduce(
+    (total, char) => (total * 31 + char.charCodeAt(0)) >>> 0,
+    7,
+  );
+  return modulo === 0 ? 0 : hash % modulo;
 }
 
 function latestRepTurnMatches({ session, repMessage }) {
@@ -74,7 +89,7 @@ function buildConversationFlowGuard({ scenario, session, repMessage }) {
 
   if (hasRightPersonAsk(repMessage)) {
     return {
-      text: "I am involved in those decisions, but what is the actual relevance to us?",
+      text: RIGHT_PERSON_REPLIES[stableIndex(`${session.id}:${repMessage}`, RIGHT_PERSON_REPLIES.length)],
       mood: "busy",
       provider: "flow_guard",
       flowGuard: "right_person_check",
@@ -132,7 +147,7 @@ function buildBrainPayload({ scenario, session, repMessage }) {
   const objection = selectNextObjection({ scenario, session, repMessage });
   return {
     instruction:
-      "Reply only as the customer in a realistic cold-call training roleplay. Keep the response spoken, short, and in character. Follow the transcript's immediate conversational state. Do not answer or volunteer discovery facts unless the latest rep message actually asked for that topic. If the latest rep message asks whether you are the right person or decision-maker, answer that routing question briefly before asking why it is relevant. If the latest rep message is a vague explanation, challenge or clarify that explanation instead of answering an unasked question. If the rep has not explained who they are with and why they are calling, ask for that context instead of introducing a later objection. Do not reveal that you are an AI. If forcedObjection is present, your reply must express that objection and must not introduce a different company, industry, or objection.",
+      "Reply only as the customer in a realistic cold-call training roleplay. Keep the response spoken, short, and in character. Follow the transcript's immediate conversational state. Do not answer or volunteer discovery facts unless the latest rep message actually asked for that topic. If the latest rep message asks whether you are the right person or decision-maker, answer that routing question briefly first; you may be the right person, not the right person, or need clarification before routing them. If the latest rep message is a vague explanation, challenge or clarify that explanation instead of answering an unasked question. If the rep has not explained who they are with and why they are calling, ask for that context instead of introducing a later objection. Do not reveal that you are an AI. If forcedObjection is present, your reply must express that objection and must not introduce a different company, industry, or objection.",
     scenario,
     sessionId: session.id,
     transcript: session.turns,
