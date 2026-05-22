@@ -301,6 +301,34 @@ test("dialogue render passes the shorter render timeout to the provider", async 
   assert.equal(providerOptions.timeoutMs, 1234);
 });
 
+test("dialogue render uses the configured command provider without injection", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS = "1000";
+  process.env.CODEX_BRAIN_COMMAND = JSON.stringify([
+    process.execPath,
+    "-e",
+    "process.stdin.resume();process.stdin.on('end',()=>console.log(JSON.stringify({reply:'James from where, and what company is this?',mood:'busy'})))",
+  ]);
+
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-default-command-render",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "hey this is James" },
+      ],
+    },
+    repMessage: "hey this is James",
+  });
+
+  assert.equal(reply.provider, "command");
+  assert.equal(reply.dialogue.renderedBy, "llm");
+  assert.equal(reply.dialogue.rendererProvider, "command");
+  assert.equal(reply.dialogue.fallbackReason, null);
+});
+
 test("dialogue render retries once on constraint violation within the turn budget", async () => {
   process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
   process.env.DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION = "1";
