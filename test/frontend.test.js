@@ -23,6 +23,22 @@ test("sending stops the mic, clears composer, and refocuses input", async () => 
   assert.match(submitMessage, /elements\.messageInput\.focus\(\)/);
 });
 
+test("sending shows the rep turn and customer typing bubble before the API returns", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const submitMessage = appJs.slice(appJs.indexOf("async function submitMessage()"), appJs.indexOf("async function endCall()"));
+  const pendingIndex = submitMessage.indexOf("showPendingCustomerReply(text)");
+  const apiIndex = submitMessage.indexOf("await api(`/api/sessions/${state.session.id}/message`");
+
+  assert.match(appJs, /pendingTranscriptTurns/);
+  assert.match(appJs, /function showPendingCustomerReply/);
+  assert.match(appJs, /function clearPendingTranscriptTurns/);
+  assert.ok(pendingIndex !== -1);
+  assert.ok(apiIndex !== -1);
+  assert.ok(pendingIndex < apiIndex);
+  const styles = await fs.readFile(path.join(__dirname, "..", "public", "styles.css"), "utf8");
+  assert.match(styles, /\.turn\.typing/);
+});
+
 test("mic button lives beside send as an icon control", async () => {
   const indexHtml = await fs.readFile(path.join(__dirname, "..", "public", "index.html"), "utf8");
   const composer = indexHtml.slice(indexHtml.indexOf('<form class="composer"'), indexHtml.indexOf("</form>", indexHtml.indexOf('<form class="composer"')));

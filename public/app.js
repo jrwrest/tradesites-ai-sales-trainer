@@ -12,6 +12,7 @@ const state = {
   authRequired: false,
   signupEnabled: false,
   signupMode: "disabled",
+  pendingTranscriptTurns: [],
 };
 
 const elements = {
@@ -94,6 +95,7 @@ function clearActiveSession() {
   stopMic({ updateButtons: false });
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   state.session = null;
+  clearPendingTranscriptTurns();
   state.startedAt = null;
   clearInterval(state.timerId);
   updateTimer();
@@ -205,10 +207,18 @@ function renderDueDrill(drill) {
 
 function renderTranscript() {
   elements.transcript.innerHTML = "";
-  const turns = state.session?.turns || [];
+  const turns = [...(state.session?.turns || []), ...state.pendingTranscriptTurns];
   turns.forEach((turn) => {
     const item = document.createElement("div");
-    item.className = `turn ${turn.role || "user"}${turn.warning ? " warning" : ""}`;
+    item.className = [
+      "turn",
+      turn.role || "user",
+      turn.warning ? "warning" : "",
+      turn.pending ? "pending" : "",
+      turn.typing ? "typing" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     const label = document.createElement("strong");
     label.textContent = turn.role === "persona" ? "Customer" : "You";
@@ -224,6 +234,29 @@ function renderTranscript() {
     elements.transcript.append(item);
   });
   elements.transcript.scrollTop = elements.transcript.scrollHeight;
+}
+
+function clearPendingTranscriptTurns() {
+  state.pendingTranscriptTurns = [];
+}
+
+function showPendingCustomerReply(text) {
+  state.pendingTranscriptTurns = [
+    {
+      id: "pending-rep-turn",
+      role: "user",
+      text,
+      pending: true,
+    },
+    {
+      id: "pending-customer-turn",
+      role: "persona",
+      text: "Customer is replying",
+      pending: true,
+      typing: true,
+    },
+  ];
+  renderTranscript();
 }
 
 function renderScore(evaluation) {
@@ -800,12 +833,14 @@ async function submitMessage() {
   state.waiting = true;
   setButtons();
   elements.messageInput.value = "";
+  showPendingCustomerReply(text);
   try {
     if (state.session.gauntlet) {
       const payload = await api(`/api/gauntlets/${state.session.id}/round`, {
         method: "POST",
         body: JSON.stringify({ text }),
       });
+      clearPendingTranscriptTurns();
       state.session = payload.session;
       renderTranscript();
       if (state.session.status === "ended") {
@@ -835,11 +870,14 @@ async function submitMessage() {
       method: "POST",
       body: JSON.stringify({ text }),
     });
+    clearPendingTranscriptTurns();
     state.session = payload.session;
     renderTranscript();
     speak(payload.reply.text);
     setStatus(payload.reply.warning ? `Using mock fallback: ${payload.reply.warning}` : "Customer replied.");
   } catch (error) {
+    clearPendingTranscriptTurns();
+    renderTranscript();
     setStatus(error.message, true);
   } finally {
     state.waiting = false;
