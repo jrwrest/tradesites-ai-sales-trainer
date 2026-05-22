@@ -36,6 +36,10 @@ function getBrainProvider() {
   return "mock";
 }
 
+function isDialogueManagerEnabled() {
+  return process.env.DIALOGUE_MANAGER_ENABLED === "1";
+}
+
 function isLoopbackHost(host) {
   return ["127.0.0.1", "localhost", "::1"].includes(host);
 }
@@ -121,6 +125,9 @@ function createApp(options = {}) {
     res.json({
       ok: true,
       brain: getBrainProvider(),
+      dialogueManager: {
+        enabled: isDialogueManagerEnabled(),
+      },
       auth: {
         required: authRequired,
         signupEnabled,
@@ -569,6 +576,7 @@ function createApp(options = {}) {
         objectionId: reply.objectionId,
         objectionType: reply.objectionType,
         flowGuard: reply.flowGuard,
+        dialogue: reply.dialogue,
         warning: reply.warning,
         warningCode: reply.warningCode,
         at: new Date().toISOString(),
@@ -578,6 +586,7 @@ function createApp(options = {}) {
         ...(session.state || {}),
         stage: inferStage(session.turns),
         currentObjectionId: reply.objectionId || null,
+        dialogue: reply.dialogue || (session.state && session.state.dialogue) || null,
         objectionsUsed: [
           ...new Set([
             ...((session.state && session.state.objectionsUsed) || []),
