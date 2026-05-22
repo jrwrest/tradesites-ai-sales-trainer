@@ -92,10 +92,29 @@ test("serves scenarios and health", async () => {
   assert.equal(health.body.auth.signupEnabled, false);
   assert.equal(health.body.auth.signupMode, "disabled");
   assert.equal(health.body.auth.pocketBaseUrl, undefined);
+  assert.equal(health.body.dialogueRendering.enabled, false);
+  assert.equal(health.body.dialogueRendering.timeoutMs, 10000);
+  assert.equal(health.body.dialogueRendering.maxConcurrentPerSession, 1);
 
   const scenarios = await request("/api/scenarios");
   assert.equal(scenarios.response.status, 200);
   assert.ok(scenarios.body.scenarios.length >= 1);
+});
+
+test("health exposes dialogue render flag and timeout", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS = "9000";
+
+  const health = await request("/api/health");
+
+  assert.equal(health.response.status, 200);
+  assert.equal(health.body.dialogueRendering.enabled, true);
+  assert.equal(health.body.dialogueRendering.provider, "mock");
+  assert.equal(health.body.dialogueRendering.timeoutMs, 9000);
+  assert.equal(health.body.dialogueRendering.maxConcurrentPerSession, 1);
+
+  delete process.env.DIALOGUE_LLM_RENDER_ENABLED;
+  delete process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS;
 });
 
 test("serves public home page", async () => {

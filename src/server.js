@@ -3,7 +3,12 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { scenarios, getScenario } = require("./scenarios");
 const { ensureStore, listSessions, loadSession, saveSession } = require("./store");
-const { generateCustomerReply } = require("./brain");
+const {
+  generateCustomerReply,
+  getDialogueRenderMaxConcurrentPerSession,
+  getDialogueRenderTimeoutMs,
+  isDialogueLlmRenderEnabled,
+} = require("./brain");
 const { scoreTranscript } = require("./scoring");
 const { getDueDrills, updateSkillMemory } = require("./skillMemory");
 const { generateGauntletPlan, scoreGauntletAnswer, scoreHardNoCleanExit, summarizeGauntlet } = require("./gauntlet");
@@ -127,6 +132,12 @@ function createApp(options = {}) {
       brain: getBrainProvider(),
       dialogueManager: {
         enabled: isDialogueManagerEnabled(),
+      },
+      dialogueRendering: {
+        enabled: isDialogueLlmRenderEnabled(),
+        provider: getBrainProvider(),
+        timeoutMs: getDialogueRenderTimeoutMs(),
+        maxConcurrentPerSession: getDialogueRenderMaxConcurrentPerSession(),
       },
       auth: {
         required: authRequired,

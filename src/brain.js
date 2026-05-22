@@ -11,6 +11,9 @@ const FALLBACKS = [
   "Send me something over and I will look at it.",
 ];
 
+const DEFAULT_DIALOGUE_RENDER_TIMEOUT_MS = 10000;
+const activeDialogueRenderSessions = new Map();
+
 const RIGHT_PERSON_REPLIES = [
   "Maybe. What did you send over?",
   "No, not directly. What is this about?",
@@ -192,6 +195,295 @@ function fallbackWithWarning({ scenario, session, repMessage, code }) {
     warning: "AI provider unavailable; using mock customer.",
     warningCode: code,
   };
+}
+
+function isDialogueLlmRenderEnabled() {
+  return process.env.DIALOGUE_LLM_RENDER_ENABLED === "1";
+}
+
+function getDialogueRenderTimeoutMs() {
+  const timeoutMs = Number(process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS || DEFAULT_DIALOGUE_RENDER_TIMEOUT_MS);
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_DIALOGUE_RENDER_TIMEOUT_MS;
+}
+
+function getDialogueRenderMaxConcurrentPerSession() {
+  const maxConcurrent = Number(process.env.DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_SESSION || 1);
+  return Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? Math.floor(maxConcurrent) : 1;
+}
+
+function getDefaultRenderProvider() {
+  if (process.env.OPENCLAW_GATEWAY_URL) return runOpenClawBrain;
+  if (process.env.CODEX_BRAIN_COMMAND) return runCommandBrain;
+  return null;
+}
+
+function withTimeout(promise, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      const error = new Error("Dialogue render timed out");
+      error.code = "DIALOGUE_RENDER_TIMEOUT";
+      reject(error);
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+function forbiddenTopicsForReply(reply) {
+  if (reply.flowGuard === "missing_call_context" || reply.dialogue?.customerAction === "repeat_gatekeeper_context_request") {
+    return ["existing solar", "multi-site complexity", "procurement"];
+  }
+  if (reply.flowGuard === "right_person_check" || reply.dialogue?.customerAction === "answer_routing_question") {
+    return ["existing solar", "multi-site complexity", "procurement"];
+  }
+  if (reply.dialogue?.customerAction === "end_call" || reply.dialogue?.customerAction === "repeat_hard_no") {
+    return ["meeting request", "sale reopening", "new objection"];
+  }
+  return [];
+}
+
+function requiredTopicForReply(reply) {
+  if (reply.flowGuard === "missing_call_context" || reply.dialogue?.customerAction === "repeat_gatekeeper_context_request") {
+    return "caller identity, company, and reason for the call";
+  }
+  if (reply.flowGuard === "right_person_check" || reply.dialogue?.customerAction === "answer_routing_question") {
+    return "whether this is the right person or what the call is about";
+  }
+  if (reply.flowGuard === "energy_bill_qualification") {
+    return "why the rep needs electricity usage or bill information";
+  }
+  if (reply.flowGuard === "commercial_model_follow_up" || reply.dialogue?.customerAction === "stay_on_commercial_model") {
+    return "what is needed to check the commercial model";
+  }
+  if (reply.flowGuard === "landlord_follow_up" || reply.dialogue?.customerAction === "stay_on_landlord_route") {
+    return "landlord route or landlord note";
+  }
+  if (reply.dialogue?.customerAction === "stay_on_existing_solar") {
+    return "existing solar system checks";
+  }
+  if (reply.dialogue?.customerAction === "end_call" || reply.dialogue?.customerAction === "repeat_hard_no") {
+    return "ending the call after a hard no";
+  }
+  return "latest rep message";
+}
+
+function customerActionForReply(reply) {
+  if (reply.dialogue?.customerAction) return reply.dialogue.customerAction;
+  if (reply.flowGuard === "missing_call_context") return "repeat_gatekeeper_context_request";
+  if (reply.flowGuard === "right_person_check") return "answer_routing_question";
+  if (reply.flowGuard === "energy_bill_qualification") return "answer_energy_qualification_question";
+  if (reply.flowGuard === "commercial_model_follow_up") return "stay_on_commercial_model";
+  if (reply.flowGuard === "landlord_follow_up") return "stay_on_landlord_route";
+  return "reply_to_latest_rep_turn";
+}
+
+function buildDialogueContract({ reply, session, repMessage }) {
+  const customerAction = customerActionForReply(reply);
+  return {
+    state: reply.dialogue?.state || reply.flowGuard || "guarded_reply",
+    repAct: reply.dialogue?.repAct || reply.flowGuard || "guarded_reply",
+    customerAction,
+    sourceProvider: reply.provider,
+    flowGuard: reply.flowGuard,
+    activeObjectionId: reply.objectionId || reply.dialogue?.activeObjectionId || null,
+    activeObjectionType: reply.objectionType || reply.dialogue?.activeObjectionType || null,
+    requiredTopic: requiredTopicForReply(reply),
+    forbiddenTopics: forbiddenTopicsForReply(reply),
+    mustAnswerLatestQuestion: true,
+    schedulerBlocked: reply.dialogue?.schedulerBlocked ?? true,
+    tone: `${reply.mood || "busy"}, natural, guarded`,
+    maxWords: 28,
+    fallbackText: reply.text,
+    latestRepMessage: repMessage,
+    turnCount: (session.turns || []).length,
+  };
+}
+
+function buildDialogueRenderPayload({ scenario, session, repMessage, contract }) {
+  const payload = {
+    instruction:
+      "Reply only as the customer in a realistic cold-call training roleplay. Render one short, natural spoken reply that follows dialogueContract exactly. Answer or challenge the latest rep message directly. Do not jump to a different objection. Do not reveal that you are an AI.",
+    scenario,
+    sessionId: session.id,
+    transcript: session.turns,
+    latestRepMessage: repMessage,
+    dialogueContract: contract,
+    responseSchema: {
+      text: "string customer reply",
+      mood: "short optional mood label",
+    },
+  };
+
+  if (contract.activeObjectionId) {
+    payload.forcedObjection = {
+      id: contract.activeObjectionId,
+      type: contract.activeObjectionType,
+    };
+  }
+
+  return payload;
+}
+
+function matchesForbiddenTopic(text, topic) {
+  const normalized = String(text || "");
+  if (topic === "existing solar") return /\b(already have solar|solar installed|existing solar|current system|monitor the system)\b/i.test(normalized);
+  if (topic === "multi-site complexity") return /\b(multiple sites|different leases|different meters|not a quick conversation)\b/i.test(normalized);
+  if (topic === "procurement") return /\b(procurement|sustainability|supplier call)\b/i.test(normalized);
+  if (topic === "meeting request") return /\b(meeting|book|schedule|calendar|supplier call)\b/i.test(normalized);
+  if (topic === "sale reopening") return /\b(send me|tell me more|what are you offering|sounds interesting)\b/i.test(normalized);
+  if (topic === "new objection") return /\b(already have solar|procurement|landlord|consultant|multiple sites)\b/i.test(normalized);
+  return false;
+}
+
+function validateRenderedDialogue({ text, contract }) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return { code: "empty_output", reason: "Provider returned no customer text." };
+
+  for (const topic of contract.forbiddenTopics || []) {
+    if (matchesForbiddenTopic(trimmed, topic)) {
+      return {
+        code: "forbidden_topic",
+        topic,
+        reason: `Rendered reply introduced forbidden topic: ${topic}.`,
+      };
+    }
+  }
+
+  if (contract.customerAction === "repeat_gatekeeper_context_request") {
+    const asksForContext = /\b(who|from where|what company|who are you with|what is this about|what are you calling about|which company)\b/i.test(
+      trimmed,
+    );
+    if (!asksForContext) {
+      return { code: "ignored_context_request", reason: "Rendered reply did not ask for caller/company context." };
+    }
+  }
+
+  if (contract.customerAction === "end_call" && !/\b(okay|thanks|bye|goodbye|understood)\b/i.test(trimmed)) {
+    return { code: "did_not_end_call", reason: "Rendered reply did not end the call." };
+  }
+
+  if (contract.customerAction === "repeat_hard_no" && !/\b(no requirement|take us off|not interested|do not call|no use)\b/i.test(trimmed)) {
+    return { code: "did_not_repeat_hard_no", reason: "Rendered reply did not repeat the hard no." };
+  }
+
+  return null;
+}
+
+function withDialogueTrace(reply, trace) {
+  return {
+    ...reply,
+    dialogue: {
+      ...(reply.dialogue || {}),
+      repAct: reply.dialogue?.repAct || trace.contract.repAct,
+      customerAction: reply.dialogue?.customerAction || trace.contract.customerAction,
+      state: reply.dialogue?.state || trace.contract.state,
+      schedulerBlocked: reply.dialogue?.schedulerBlocked ?? trace.contract.schedulerBlocked,
+      renderedBy: trace.renderedBy,
+      rendererProvider: trace.rendererProvider,
+      fallbackReason: trace.fallbackReason,
+      constraintViolation: trace.constraintViolation,
+      latencyMs: trace.latencyMs,
+    },
+  };
+}
+
+async function maybeRenderDialogueReply({ scenario, session, repMessage, reply, renderProvider }) {
+  const provider = renderProvider || getDefaultRenderProvider();
+  if (!isDialogueLlmRenderEnabled() || !provider) return reply;
+
+  const sessionKey = session.id || "stateless";
+  const contract = buildDialogueContract({ reply, session, repMessage });
+  const activeCount = activeDialogueRenderSessions.get(sessionKey) || 0;
+  if (activeCount >= getDialogueRenderMaxConcurrentPerSession()) {
+    return withDialogueTrace(reply, {
+      contract,
+      renderedBy: "fallback",
+      rendererProvider: "none",
+      fallbackReason: "concurrency_limit",
+      constraintViolation: null,
+      latencyMs: 0,
+    });
+  }
+
+  const startedAt = Date.now();
+  activeDialogueRenderSessions.set(sessionKey, activeCount + 1);
+  const timeoutMs = getDialogueRenderTimeoutMs();
+  const deadline = startedAt + timeoutMs;
+  const providerName = renderProvider ? "injected" : getBrainProvider();
+
+  try {
+    const payload = buildDialogueRenderPayload({ scenario, session, repMessage, contract });
+    let rendered = await withTimeout(Promise.resolve().then(() => provider(payload)), Math.max(1, deadline - Date.now()));
+    let renderedText = String(rendered?.text || rendered?.reply || "").trim().slice(0, 1200);
+    let violation = validateRenderedDialogue({ text: renderedText, contract });
+    const rendererProvider = rendered?.provider || providerName;
+
+    if (violation && process.env.DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION === "1" && Date.now() < deadline - 100) {
+      const retryPayload = {
+        ...payload,
+        instruction: `${payload.instruction} Your previous reply violated the dialogue contract: ${violation.reason}. Try again and obey the contract.`,
+        previousViolation: violation,
+      };
+      rendered = await withTimeout(Promise.resolve().then(() => provider(retryPayload)), Math.max(1, deadline - Date.now()));
+      renderedText = String(rendered?.text || rendered?.reply || "").trim().slice(0, 1200);
+      violation = validateRenderedDialogue({ text: renderedText, contract });
+    }
+
+    if (violation) {
+      return withDialogueTrace(reply, {
+        contract,
+        renderedBy: "fallback",
+        rendererProvider,
+        fallbackReason: "constraint_violation",
+        constraintViolation: violation,
+        latencyMs: Date.now() - startedAt,
+      });
+    }
+
+    return withDialogueTrace(
+      {
+        ...reply,
+        text: renderedText,
+        mood: rendered?.mood || reply.mood,
+        provider: rendererProvider,
+        warning: undefined,
+        warningCode: undefined,
+      },
+      {
+        contract,
+        renderedBy: "llm",
+        rendererProvider,
+        fallbackReason: null,
+        constraintViolation: null,
+        latencyMs: Date.now() - startedAt,
+      },
+    );
+  } catch (error) {
+    return withDialogueTrace(reply, {
+      contract,
+      renderedBy: "fallback",
+      rendererProvider: error.code === "DIALOGUE_RENDER_TIMEOUT" ? providerName : providerName,
+      fallbackReason: error.code === "DIALOGUE_RENDER_TIMEOUT" ? "provider_timeout" : "provider_error",
+      constraintViolation: null,
+      latencyMs: Date.now() - startedAt,
+    });
+  } finally {
+    const remainingCount = (activeDialogueRenderSessions.get(sessionKey) || 1) - 1;
+    if (remainingCount > 0) {
+      activeDialogueRenderSessions.set(sessionKey, remainingCount);
+    } else {
+      activeDialogueRenderSessions.delete(sessionKey);
+    }
+  }
 }
 
 function buildBrainPayload({ scenario, session, repMessage }) {
@@ -436,20 +728,26 @@ function runCommandBrain(payload) {
   });
 }
 
-async function generateCustomerReply({ scenario, session, repMessage }) {
+async function generateCustomerReply({ scenario, session, repMessage, renderProvider }) {
   if (process.env.DIALOGUE_MANAGER_ENABLED === "1") {
     const dialogueReply = buildDialogueReply({ scenario, session, repMessage });
-    if (dialogueReply) return dialogueReply;
+    if (dialogueReply) {
+      return maybeRenderDialogueReply({ scenario, session, repMessage, reply: dialogueReply, renderProvider });
+    }
   }
 
   const flowGuard = buildConversationFlowGuard({ scenario, session, repMessage });
-  if (flowGuard) return flowGuard;
+  if (flowGuard) return maybeRenderDialogueReply({ scenario, session, repMessage, reply: flowGuard, renderProvider });
 
   const qualificationGuard = buildQualificationFlowGuard({ repMessage });
-  if (qualificationGuard) return qualificationGuard;
+  if (qualificationGuard) {
+    return maybeRenderDialogueReply({ scenario, session, repMessage, reply: qualificationGuard, renderProvider });
+  }
 
   const objectionFollowUpGuard = buildObjectionFollowUpGuard({ session, repMessage });
-  if (objectionFollowUpGuard) return objectionFollowUpGuard;
+  if (objectionFollowUpGuard) {
+    return maybeRenderDialogueReply({ scenario, session, repMessage, reply: objectionFollowUpGuard, renderProvider });
+  }
 
   const payload = buildBrainPayload({ scenario, session, repMessage });
   const forcedObjection = payload.forcedObjection;
@@ -492,7 +790,10 @@ module.exports = {
   buildCommandEnv,
   buildConversationFlowGuard,
   buildQualificationFlowGuard,
+  getDialogueRenderMaxConcurrentPerSession,
+  getDialogueRenderTimeoutMs,
   generateCustomerReply,
+  isDialogueLlmRenderEnabled,
   mockReply,
   parseCommandLine,
   fallbackWithWarning,
