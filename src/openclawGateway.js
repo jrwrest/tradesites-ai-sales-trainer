@@ -263,7 +263,7 @@ async function runOpenClawBrain(payload, options = {}) {
 
   const timeoutMs = Number(options.timeoutMs ?? process.env.OPENCLAW_GATEWAY_TIMEOUT_MS ?? 45000);
   const agentId = process.env.OPENCLAW_AGENT_ID || "main";
-  const sessionKey = `tradesites-ai-sales-trainer:${payload.scenario.id}:${payload.sessionId || "local"}`;
+  const sessionKey = `agent:${agentId}:tradesites-ai-sales-trainer:${payload.scenario.id}:${payload.sessionId || "local"}`;
   const client = new OpenClawGatewayClient({ url, token, timeoutMs, agentId });
 
   try {
