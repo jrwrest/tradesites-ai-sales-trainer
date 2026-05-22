@@ -254,14 +254,14 @@ function parseCustomerReply(text) {
   };
 }
 
-async function runOpenClawBrain(payload) {
+async function runOpenClawBrain(payload, options = {}) {
   const url = process.env.OPENCLAW_GATEWAY_URL;
   const token = process.env.OPENCLAW_GATEWAY_TOKEN;
   if (!url) throw new Error("OPENCLAW_GATEWAY_URL is not set");
   if (!token) throw new Error("OPENCLAW_GATEWAY_TOKEN is not set");
   validateGatewayUrl(url);
 
-  const timeoutMs = Number(process.env.OPENCLAW_GATEWAY_TIMEOUT_MS || 45000);
+  const timeoutMs = Number(options.timeoutMs ?? process.env.OPENCLAW_GATEWAY_TIMEOUT_MS ?? 45000);
   const agentId = process.env.OPENCLAW_AGENT_ID || "main";
   const sessionKey = `tradesites-ai-sales-trainer:${payload.scenario.id}:${payload.sessionId || "local"}`;
   const client = new OpenClawGatewayClient({ url, token, timeoutMs, agentId });

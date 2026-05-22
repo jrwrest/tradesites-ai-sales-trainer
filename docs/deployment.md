@@ -71,6 +71,9 @@ DIALOGUE_MANAGER_ENABLED=1
 DIALOGUE_LLM_RENDER_ENABLED=1
 DIALOGUE_LLM_RENDER_TIMEOUT_MS=10000
 DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION=0
+DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_SESSION=1
+DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_USER=2
+DIALOGUE_LLM_RENDER_MAX_CONCURRENT_GLOBAL=10
 ```
 
 Keep `DIALOGUE_LLM_RENDER_ENABLED=0` for normal production rollback. The render timeout should stay well below the general OpenClaw timeout so a single turn cannot freeze the trainer.
@@ -94,7 +97,19 @@ Expected shape:
     "enabled": false,
     "provider": "mock",
     "timeoutMs": 10000,
-    "maxConcurrentPerSession": 1
+    "maxConcurrentPerSession": 1,
+    "maxConcurrentPerUser": 2,
+    "maxConcurrentGlobal": 10,
+    "stats": {
+      "attempts": 0,
+      "rendered": 0,
+      "fallbacks": 0,
+      "timeouts": 0,
+      "constraintViolations": 0,
+      "providerErrors": 0,
+      "concurrencyLimited": 0,
+      "active": 0
+    }
   },
   "auth": {
     "required": true,
