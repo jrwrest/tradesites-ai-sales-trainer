@@ -64,6 +64,22 @@ function isValuePitch(text = "") {
   );
 }
 
+function customerAskedForCallContext(turn) {
+  return (
+    turn?.objectionId === "gatekeeper-who-is-this" ||
+    turn?.flowGuard === "missing_call_context" ||
+    /\b(from where|who are you with|what is this about|what'?s this about|from where,? and what|coco from where|james from where)\b/i.test(
+      turn?.text || "",
+    )
+  );
+}
+
+function answeredCallContext(text = "") {
+  return /\b(from|with|at)\s+[A-Z]?[a-z][a-z0-9& .'-]{2,}|solar|energy|electricity|ppa|power purchase|commercial|company|business|scotland|installer|reason (?:for|i called)|calling about|sent (?:you )?an email|emailed/i.test(
+    text,
+  );
+}
+
 function classifyRepTurn({ session, repMessage }) {
   const latestCustomer = latestCustomerTurn(session);
 
@@ -72,6 +88,14 @@ function classifyRepTurn({ session, repMessage }) {
       label: isCleanExit(repMessage) ? "clean_exit" : "push_after_hard_no",
       confidence: 0.95,
       reason: "Previous customer turn contains a hard no or take-us-off request.",
+    };
+  }
+
+  if (customerAskedForCallContext(latestCustomer) && !answeredCallContext(repMessage)) {
+    return {
+      label: "context_repair_needed",
+      confidence: 0.92,
+      reason: "Customer asked for caller/company/reason context and the rep did not answer it.",
     };
   }
 
@@ -156,6 +180,24 @@ function buildDialogueReply({ scenario, session, repMessage }) {
         repAct: classification.label,
         customerAction: "answer_routing_question",
         state: "routing",
+        confidence: classification.confidence,
+        reason: classification.reason,
+        schedulerBlocked: true,
+      },
+    };
+  }
+
+  if (classification.label === "context_repair_needed") {
+    return {
+      text: "No, I am asking who you are with and what this is about.",
+      mood: "confused",
+      provider: "dialogue_manager",
+      objectionId: "gatekeeper-who-is-this",
+      objectionType: "gatekeeper",
+      dialogue: {
+        repAct: classification.label,
+        customerAction: "repeat_gatekeeper_context_request",
+        state: "opening_context",
         confidence: classification.confidence,
         reason: classification.reason,
         schedulerBlocked: true,
