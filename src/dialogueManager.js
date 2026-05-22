@@ -7,6 +7,13 @@ const ROUTING_REPLIES = [
   "Possibly, but I need to know what you are asking before I point you anywhere.",
 ];
 
+const CONTEXT_REPAIR_REPLIES = [
+  "Sorry, who are you with?",
+  "Before we get into that, what company are you calling from?",
+  "I do not follow. Who are you with and what is this about?",
+  "My site? Sorry, who are you calling from?",
+];
+
 function stableIndex(seedText, modulo) {
   const hash = Array.from(String(seedText || "")).reduce(
     (total, char) => (total * 31 + char.charCodeAt(0)) >>> 0,
@@ -68,7 +75,7 @@ function customerAskedForCallContext(turn) {
   return (
     turn?.objectionId === "gatekeeper-who-is-this" ||
     turn?.flowGuard === "missing_call_context" ||
-    /\b(from where|who are you with|what is this about|what'?s this about|from where,? and what|coco from where|james from where)\b/i.test(
+    /\b(who is this|who'?s this|who are you|who am i speaking|from where|who are you with|what is this about|what'?s this about|from where,? and what|coco from where|james from where)\b/i.test(
       turn?.text || "",
     )
   );
@@ -76,6 +83,12 @@ function customerAskedForCallContext(turn) {
 
 function answeredCallContext(text = "") {
   return /\b(from|with|at)\s+[A-Z]?[a-z][a-z0-9& .'-]{2,}|solar|energy|electricity|ppa|power purchase|commercial|company|business|scotland|installer|reason (?:for|i called)|calling about|sent (?:you )?an email|emailed/i.test(
+    text,
+  );
+}
+
+function asksQuestionBackInsteadOfAnswering(text = "") {
+  return /\b(where is your|what are you|what do you do|who are you|can you answer|are you there|what was your question|what are you calling about|what is your site)\b/i.test(
     text,
   );
 }
@@ -91,7 +104,10 @@ function classifyRepTurn({ session, repMessage }) {
     };
   }
 
-  if (customerAskedForCallContext(latestCustomer) && !answeredCallContext(repMessage)) {
+  if (
+    customerAskedForCallContext(latestCustomer) &&
+    (asksQuestionBackInsteadOfAnswering(repMessage) || !answeredCallContext(repMessage))
+  ) {
     return {
       label: "context_repair_needed",
       confidence: 0.92,
@@ -189,7 +205,7 @@ function buildDialogueReply({ scenario, session, repMessage }) {
 
   if (classification.label === "context_repair_needed") {
     return {
-      text: "No, I am asking who you are with and what this is about.",
+      text: CONTEXT_REPAIR_REPLIES[stableIndex(`${session.id}:${repMessage}`, CONTEXT_REPAIR_REPLIES.length)],
       mood: "confused",
       provider: "dialogue_manager",
       objectionId: "gatekeeper-who-is-this",

@@ -121,7 +121,66 @@ test("dialogue manager keeps unresolved gatekeeper context in repair instead of 
   assert.equal(reply.dialogue?.customerAction, "repeat_gatekeeper_context_request");
   assert.equal(reply.dialogue?.schedulerBlocked, true);
   assert.doesNotMatch(reply.text, /already have solar|multiple sites|different leases/i);
-  assert.match(reply.text, /asking|who.*with|what.*about|from where/i);
+  assert.match(reply.text, /asking|who.*with|who.*calling from|what.*about|from where|site|sorry/i);
+});
+
+test("dialogue manager repairs odd question-back replies after who-is-this opener", async () => {
+  const repMessage = "james where is your site";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "dialogue-manager-who-is-this-question-back",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.dialogue?.repAct, "context_repair_needed");
+  assert.equal(reply.dialogue?.customerAction, "repeat_gatekeeper_context_request");
+  assert.equal(reply.dialogue?.schedulerBlocked, true);
+  assert.doesNotMatch(reply.text, /Keep it brief|relevance to us|already have solar|multiple sites/i);
+  assert.match(reply.text, /site|sorry|who.*with|what.*about/i);
+});
+
+test("dialogue manager keeps weird opener non-answers in context repair", async () => {
+  const cases = [
+    "this is James",
+    "James where is your site",
+    "what do you do there",
+    "can you answer me first",
+    "what are you calling about",
+    "who are you again",
+    "James, are you there",
+    "sorry what was your question",
+  ];
+
+  for (const repMessage of cases) {
+    const reply = await generateCustomerReply({
+      scenario: enterpriseScenario,
+      session: {
+        id: `dialogue-manager-weird-opener-${repMessage.length}`,
+        scenarioId: enterpriseScenario.id,
+        turns: [
+          { role: "persona", text: enterpriseScenario.persona.openingLine },
+          { role: "user", text: repMessage },
+        ],
+      },
+      repMessage,
+    });
+
+    assert.equal(reply.provider, "dialogue_manager", repMessage);
+    assert.equal(reply.dialogue?.repAct, "context_repair_needed", repMessage);
+    assert.equal(reply.dialogue?.customerAction, "repeat_gatekeeper_context_request", repMessage);
+    assert.equal(reply.dialogue?.schedulerBlocked, true, repMessage);
+    assert.doesNotMatch(reply.text, /Keep it brief|relevance to us|already have solar|multiple sites/i, repMessage);
+    assert.match(reply.text, /sorry|who|what company|what.*about|calling from/i, repMessage);
+  }
 });
 
 test("dialogue manager can be disabled for rollback", async () => {
@@ -160,7 +219,7 @@ test("dialogue manager classifies the v1 rep act surface", () => {
   const baseSession = {
     id: "dialogue-manager-classifier",
     scenarioId: enterpriseScenario.id,
-    turns: [{ role: "persona", text: enterpriseScenario.persona.openingLine }],
+    turns: [{ role: "persona", text: "Okay, go ahead." }],
   };
 
   const cases = [
