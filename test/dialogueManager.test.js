@@ -92,6 +92,38 @@ test("dialogue manager keeps existing-solar follow-up on the same objection", as
   assert.doesNotMatch(reply.text, /multiple sites|different leases|procurement|sustainability/i);
 });
 
+test("dialogue manager keeps unresolved gatekeeper context in repair instead of scheduling objections", async () => {
+  const repMessage = "what are you about what are you doing";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "dialogue-manager-unresolved-gatekeeper-repair",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: "this is James" },
+        {
+          role: "persona",
+          text: "James from where, and what is this about?",
+          flowGuard: "missing_call_context",
+          objectionId: "gatekeeper-who-is-this",
+          objectionType: "gatekeeper",
+        },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.dialogue?.repAct, "context_repair_needed");
+  assert.equal(reply.dialogue?.customerAction, "repeat_gatekeeper_context_request");
+  assert.equal(reply.dialogue?.schedulerBlocked, true);
+  assert.doesNotMatch(reply.text, /already have solar|multiple sites|different leases/i);
+  assert.match(reply.text, /asking|who.*with|what.*about|from where/i);
+});
+
 test("dialogue manager can be disabled for rollback", async () => {
   delete process.env.DIALOGUE_MANAGER_ENABLED;
   const repMessage =
@@ -143,6 +175,22 @@ test("dialogue manager classifies the v1 rep act surface", () => {
     {
       text: "roughly what do you pay per kWh at the moment?",
       label: "discovery_question",
+    },
+    {
+      text: "what are you about what are you doing",
+      label: "context_repair_needed",
+      session: {
+        ...baseSession,
+        turns: [
+          ...baseSession.turns,
+          {
+            role: "persona",
+            text: "James from where, and what is this about?",
+            flowGuard: "missing_call_context",
+            objectionId: "gatekeeper-who-is-this",
+          },
+        ],
+      },
     },
     {
       text: "thanks, I will close this off",
