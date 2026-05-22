@@ -1,5 +1,6 @@
 const { spawn } = require("node:child_process");
 const { runOpenClawBrain } = require("./openclawGateway");
+const { buildDialogueReply } = require("./dialogueManager");
 const { hasHardNo, selectNextObjection } = require("./objectionPlaybook");
 
 const FALLBACKS = [
@@ -436,6 +437,11 @@ function runCommandBrain(payload) {
 }
 
 async function generateCustomerReply({ scenario, session, repMessage }) {
+  if (process.env.DIALOGUE_MANAGER_ENABLED === "1") {
+    const dialogueReply = buildDialogueReply({ scenario, session, repMessage });
+    if (dialogueReply) return dialogueReply;
+  }
+
   const flowGuard = buildConversationFlowGuard({ scenario, session, repMessage });
   if (flowGuard) return flowGuard;
 

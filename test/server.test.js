@@ -229,6 +229,45 @@ test("enterprise call persists objection metadata and returns coaching", async (
   assert.equal(coaching.body.session.turns.length, 3);
 });
 
+test("dialogue manager trace is returned and persisted on customer turns", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  try {
+    const created = await request("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ scenarioId: "enterprise-commercial-solar" }),
+    });
+    assert.equal(created.response.status, 201);
+
+    const firstMessage = await request(`/api/sessions/${created.body.session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        text: "hey James hope you have front this is Coco we got 30 seconds and I'll explain why I called",
+      }),
+    });
+    assert.equal(firstMessage.response.status, 200);
+
+    const secondMessage = await request(`/api/sessions/${created.body.session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        text: "say Coco is from Scotland and we help the commercial companies cut electricity cost through a funded solar install with no upfront cost to the business would you be the best best person to speak to about this",
+      }),
+    });
+    assert.equal(secondMessage.response.status, 200);
+    assert.equal(secondMessage.body.reply.provider, "dialogue_manager");
+    assert.equal(secondMessage.body.reply.dialogue.repAct, "routing_question");
+    assert.equal(secondMessage.body.reply.dialogue.customerAction, "answer_routing_question");
+    assert.equal(secondMessage.body.session.state.dialogue.customerAction, "answer_routing_question");
+
+    const loaded = await request(`/api/sessions/${created.body.session.id}`);
+    assert.equal(loaded.response.status, 200);
+    const lastTurn = loaded.body.session.turns[loaded.body.session.turns.length - 1];
+    assert.equal(lastTurn.provider, "dialogue_manager");
+    assert.equal(lastTurn.dialogue.customerAction, "answer_routing_question");
+  } finally {
+    delete process.env.DIALOGUE_MANAGER_ENABLED;
+  }
+});
+
 test("first-turn flow guard preserves normal conversation state", async () => {
   const created = await request("/api/sessions", {
     method: "POST",
