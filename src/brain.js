@@ -245,6 +245,12 @@ function getDefaultRenderProvider() {
   return null;
 }
 
+function getConfiguredBrainProviderName() {
+  if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
+  if (process.env.CODEX_BRAIN_COMMAND) return "command";
+  return "mock";
+}
+
 function withTimeout(promise, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -534,7 +540,7 @@ async function maybeRenderDialogueReply({ scenario, session, repMessage, reply, 
   dialogueRenderStats.attempts += 1;
   const timeoutMs = getDialogueRenderTimeoutMs();
   const deadline = startedAt + timeoutMs;
-  const providerName = renderProvider ? "injected" : getBrainProvider();
+  const providerName = renderProvider ? "injected" : getConfiguredBrainProviderName();
 
   try {
     const payload = buildDialogueRenderPayload({ scenario, session, repMessage, contract });
