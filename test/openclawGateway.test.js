@@ -84,10 +84,14 @@ test("OpenClaw gateway brain runs through websocket RPC", async () => {
     assert.equal(reply.provider, "openclaw");
     assert.equal(reply.mood, "impatient");
     assert.match(reply.text, /requirement for solar/);
-  assert.equal(gateway.requests[0].method, "connect");
-  assert.equal(gateway.requests[0].params.auth.token, "test-token");
-  assert.equal(gateway.requests[1].method, "agent");
-  assert.equal(gateway.requests[1].params.timeout, 2);
+    assert.equal(gateway.requests[0].method, "connect");
+    assert.equal(gateway.requests[0].params.auth.token, "test-token");
+    assert.equal(gateway.requests[1].method, "agent");
+    assert.equal(gateway.requests[1].params.timeout, 2);
+    assert.equal(
+      gateway.requests[1].params.sessionKey,
+      "agent:main:tradesites-ai-sales-trainer:commercial-solar-rejection:test-session",
+    );
   } finally {
     delete process.env.OPENCLAW_GATEWAY_URL;
     delete process.env.OPENCLAW_GATEWAY_TOKEN;
@@ -116,6 +120,10 @@ test("OpenClaw gateway brain accepts a per-call timeout override", async () => {
 
     assert.equal(gateway.requests[1].method, "agent");
     assert.equal(gateway.requests[1].params.timeout, 7);
+    assert.equal(
+      gateway.requests[1].params.sessionKey,
+      "agent:main:tradesites-ai-sales-trainer:commercial-solar-rejection:test-session",
+    );
     assert.equal(gateway.requests[2].method, "agent.wait");
     assert.equal(gateway.requests[2].params.timeoutMs, 7000);
   } finally {
