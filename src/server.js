@@ -3,7 +3,15 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { scenarios, getScenario } = require("./scenarios");
 const { ensureStore, listSessions, loadSession, saveSession } = require("./store");
-const { generateCustomerReply } = require("./brain");
+const {
+  generateCustomerReply,
+  getDialogueRenderMaxConcurrentGlobal,
+  getDialogueRenderMaxConcurrentPerSession,
+  getDialogueRenderMaxConcurrentPerUser,
+  getDialogueRenderStats,
+  getDialogueRenderTimeoutMs,
+  isDialogueLlmRenderEnabled,
+} = require("./brain");
 const { scoreTranscript } = require("./scoring");
 const { getDueDrills, updateSkillMemory } = require("./skillMemory");
 const { generateGauntletPlan, scoreGauntletAnswer, scoreHardNoCleanExit, summarizeGauntlet } = require("./gauntlet");
@@ -94,6 +102,7 @@ function createApp(options = {}) {
   });
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
   const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
+  const customerReplyRenderProvider = options.customerReplyRenderProvider;
   const authAttempts = new Map();
   const app = express();
   const publicDir = path.join(__dirname, "..", "public");
@@ -127,6 +136,15 @@ function createApp(options = {}) {
       brain: getBrainProvider(),
       dialogueManager: {
         enabled: isDialogueManagerEnabled(),
+      },
+      dialogueRendering: {
+        enabled: isDialogueLlmRenderEnabled(),
+        provider: getBrainProvider(),
+        timeoutMs: getDialogueRenderTimeoutMs(),
+        maxConcurrentPerSession: getDialogueRenderMaxConcurrentPerSession(),
+        maxConcurrentPerUser: getDialogueRenderMaxConcurrentPerUser(),
+        maxConcurrentGlobal: getDialogueRenderMaxConcurrentGlobal(),
+        stats: getDialogueRenderStats(),
       },
       auth: {
         required: authRequired,
@@ -566,6 +584,7 @@ function createApp(options = {}) {
         scenario,
         session,
         repMessage: text,
+        renderProvider: customerReplyRenderProvider,
       });
       const customerTurn = {
         id: crypto.randomUUID(),
@@ -775,7 +794,12 @@ function createApp(options = {}) {
         scenarioId: scenario.id,
         turns: Array.isArray(req.body.turns) ? req.body.turns : [],
       };
-      const reply = await generateCustomerReply({ scenario, session, repMessage: text });
+      const reply = await generateCustomerReply({
+        scenario,
+        session,
+        repMessage: text,
+        renderProvider: customerReplyRenderProvider,
+      });
       res.json({ reply });
     } catch (error) {
       next(error);

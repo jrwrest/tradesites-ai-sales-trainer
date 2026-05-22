@@ -64,6 +64,20 @@ OPENCLAW_GATEWAY_TOKEN=replace-with-a-secret
 OPENCLAW_AGENT_ID=main
 ```
 
+Optional dialogue rendering canary:
+
+```bash
+DIALOGUE_MANAGER_ENABLED=1
+DIALOGUE_LLM_RENDER_ENABLED=1
+DIALOGUE_LLM_RENDER_TIMEOUT_MS=10000
+DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION=0
+DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_SESSION=1
+DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_USER=2
+DIALOGUE_LLM_RENDER_MAX_CONCURRENT_GLOBAL=10
+```
+
+Keep `DIALOGUE_LLM_RENDER_ENABLED=0` for normal production rollback. The render timeout should stay well below the general OpenClaw timeout so a single turn cannot freeze the trainer.
+
 ## Health Check
 
 ```bash
@@ -76,6 +90,27 @@ Expected shape:
 {
   "ok": true,
   "brain": "mock",
+  "dialogueManager": {
+    "enabled": true
+  },
+  "dialogueRendering": {
+    "enabled": false,
+    "provider": "mock",
+    "timeoutMs": 10000,
+    "maxConcurrentPerSession": 1,
+    "maxConcurrentPerUser": 2,
+    "maxConcurrentGlobal": 10,
+    "stats": {
+      "attempts": 0,
+      "rendered": 0,
+      "fallbacks": 0,
+      "timeouts": 0,
+      "constraintViolations": 0,
+      "providerErrors": 0,
+      "concurrencyLimited": 0,
+      "active": 0
+    }
+  },
   "auth": {
     "required": true,
     "signupEnabled": true,
@@ -90,6 +125,8 @@ Expected shape:
 - [ ] `.env`, PocketBase data, transcript data, and logs are outside git.
 - [ ] Public signup is disabled or approval-mode email verification is enabled for shared deployments.
 - [ ] Provider tokens are stored outside the repo and rotated if exposed.
+- [ ] Dialogue rendering is canaried with `DIALOGUE_LLM_RENDER_ENABLED=1` before broader use.
+- [ ] Rollback is tested by setting `DIALOGUE_LLM_RENDER_ENABLED=0` and restarting the service.
 - [ ] Reverse proxy terminates HTTPS.
 - [ ] Auth and app logs do not include passwords or bearer tokens.
 - [ ] Model providers have spending limits or quotas.

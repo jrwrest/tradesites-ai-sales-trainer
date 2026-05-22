@@ -9,6 +9,13 @@ function clearBrainEnv() {
   delete process.env.OPENCLAW_GATEWAY_URL;
   delete process.env.OPENCLAW_GATEWAY_TOKEN;
   delete process.env.OPENCLAW_GATEWAY_TIMEOUT_MS;
+  delete process.env.DIALOGUE_MANAGER_ENABLED;
+  delete process.env.DIALOGUE_LLM_RENDER_ENABLED;
+  delete process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS;
+  delete process.env.DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION;
+  delete process.env.DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_SESSION;
+  delete process.env.DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_USER;
+  delete process.env.DIALOGUE_LLM_RENDER_MAX_CONCURRENT_GLOBAL;
 }
 
 beforeEach(clearBrainEnv);
@@ -75,6 +82,371 @@ test("hard rejection scenario asks for context after identity-only reply", async
   assert.equal(reply.flowGuard, "missing_call_context");
   assert.match(reply.text, /from where|what is this about/i);
   assert.doesNotMatch(reply.text, /tried something like that/i);
+});
+
+test("dialogue manager replies render through an injected provider when enabled", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  const calls = [];
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-dialogue-render",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        {
+          role: "user",
+          text: "James from BrightTrade Solar. I emailed about a quick electricity cost check. Can I take 20 seconds?",
+        },
+        { role: "persona", text: "Okay. Keep it brief. What is the relevance to us?" },
+        { role: "user", text: "Are you the right person for site energy decisions?" },
+      ],
+    },
+    repMessage: "Are you the right person for site energy decisions?",
+    renderProvider: async (payload) => {
+      calls.push(payload);
+      return { text: "Possibly, but give me the short version first.", mood: "busy", provider: "fake_llm" };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].forcedObjection, undefined);
+  assert.equal(calls[0].dialogueContract.sourceProvider, "dialogue_manager");
+  assert.equal(calls[0].dialogueContract.customerAction, "answer_routing_question");
+  assert.equal(reply.provider, "fake_llm");
+  assert.equal(reply.text, "Possibly, but give me the short version first.");
+  assert.equal(reply.dialogue.renderedBy, "llm");
+  assert.equal(reply.dialogue.rendererProvider, "fake_llm");
+  assert.equal(reply.dialogue.fallbackReason, null);
+});
+
+test("flow guard replies render through an injected provider when enabled", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  const calls = [];
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-flow-render",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "hey this is James" },
+      ],
+    },
+    repMessage: "hey this is James",
+    renderProvider: async (payload) => {
+      calls.push(payload);
+      return { text: "James from where, and what company is this?", mood: "busy", provider: "fake_llm" };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].forcedObjection, undefined);
+  assert.equal(calls[0].dialogueContract.sourceProvider, "flow_guard");
+  assert.equal(reply.provider, "fake_llm");
+  assert.equal(reply.flowGuard, "missing_call_context");
+  assert.equal(reply.dialogue.renderedBy, "llm");
+});
+
+test("dialogue render flag off keeps guard replies deterministic", async () => {
+  let calls = 0;
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-render-flag-off",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "hey this is James" },
+      ],
+    },
+    repMessage: "hey this is James",
+    renderProvider: async () => {
+      calls += 1;
+      return { text: "Rendered", provider: "fake_llm" };
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(reply.provider, "flow_guard");
+  assert.equal(reply.dialogue, undefined);
+});
+
+test("dialogue render falls back when provider returns an unrelated objection", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-dialogue-invalid-render",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "this is James" },
+      ],
+    },
+    repMessage: "this is James",
+    renderProvider: async () => ({
+      text: "We already have solar installed, so I do not see why this is relevant.",
+      mood: "guarded",
+      provider: "fake_llm",
+    }),
+  });
+
+  assert.equal(reply.provider, "flow_guard");
+  assert.match(reply.text, /from where|who are you with|what company|do not follow|my site/i);
+  assert.equal(reply.dialogue.renderedBy, "fallback");
+  assert.equal(reply.dialogue.rendererProvider, "fake_llm");
+  assert.equal(reply.dialogue.fallbackReason, "constraint_violation");
+  assert.equal(reply.dialogue.constraintViolation.code, "forbidden_topic");
+});
+
+test("dialogue render falls back when provider ignores a routing question", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-routing-ignored-render",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        {
+          role: "user",
+          text: "James from BrightTrade Solar. I emailed about a quick electricity cost check. Can I take 20 seconds?",
+        },
+        { role: "persona", text: "Okay. Keep it brief. What is the relevance to us?" },
+        { role: "user", text: "Are you the right person for site energy decisions?" },
+      ],
+    },
+    repMessage: "Are you the right person for site energy decisions?",
+    renderProvider: async () => ({
+      text: "Okay. Keep it brief. What is the relevance to us?",
+      mood: "busy",
+      provider: "fake_llm",
+    }),
+  });
+
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.dialogue.renderedBy, "fallback");
+  assert.equal(reply.dialogue.fallbackReason, "constraint_violation");
+  assert.equal(reply.dialogue.constraintViolation.code, "ignored_latest_question");
+});
+
+test("dialogue render falls back when active objection jumps to a different objection", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  const reply = await generateCustomerReply({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-active-objection-jump",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: "James from BrightTrade Solar. Calling about funded commercial solar." },
+        {
+          role: "persona",
+          text: "We already have solar installed, so I do not see why this is relevant.",
+          objectionId: "already-have-solar",
+          objectionType: "existing_solution",
+        },
+        { role: "user", text: "We can check whether the current system is being maximised." },
+      ],
+    },
+    repMessage: "We can check whether the current system is being maximised.",
+    renderProvider: async (payload) => ({
+      text: "We do not own the building. The landlord would never go for it.",
+      mood: "guarded",
+      provider: "fake_llm",
+      seenForcedObjection: payload.forcedObjection,
+    }),
+  });
+
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.objectionId, "already-have-solar");
+  assert.equal(reply.dialogue.renderedBy, "fallback");
+  assert.equal(reply.dialogue.fallbackReason, "constraint_violation");
+  assert.equal(reply.dialogue.constraintViolation.code, "forbidden_topic");
+});
+
+test("dialogue render passes the shorter render timeout to the provider", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS = "1234";
+
+  let providerOptions;
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-render-timeout-options",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "hey this is James" },
+      ],
+    },
+    repMessage: "hey this is James",
+    renderProvider: async (_payload, options) => {
+      providerOptions = options;
+      return { text: "James from where, and what company is this?", provider: "fake_llm" };
+    },
+  });
+
+  assert.equal(reply.provider, "fake_llm");
+  assert.equal(providerOptions.timeoutMs, 1234);
+});
+
+test("dialogue render retries once on constraint violation within the turn budget", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION = "1";
+
+  const outputs = [
+    "We already have solar installed, so I do not see why this is relevant.",
+    "James from where, and what company is this?",
+  ];
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-render-retry",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "hey this is James" },
+      ],
+    },
+    repMessage: "hey this is James",
+    renderProvider: async () => ({ text: outputs.shift(), mood: "busy", provider: "fake_llm" }),
+  });
+
+  assert.equal(outputs.length, 0);
+  assert.equal(reply.provider, "fake_llm");
+  assert.equal(reply.text, "James from where, and what company is this?");
+  assert.equal(reply.dialogue.renderedBy, "llm");
+  assert.equal(reply.dialogue.constraintViolation, null);
+});
+
+test("dialogue render falls back on provider timeout", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS = "10";
+
+  const reply = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: {
+      id: "sample-foods-render-timeout",
+      scenarioId: hardRejectionScenario.id,
+      turns: [
+        { role: "persona", text: hardRejectionScenario.persona.openingLine },
+        { role: "user", text: "hey this is James" },
+      ],
+    },
+    repMessage: "hey this is James",
+    renderProvider: async () => new Promise(() => {}),
+  });
+
+  assert.equal(reply.provider, "flow_guard");
+  assert.equal(reply.dialogue.renderedBy, "fallback");
+  assert.equal(reply.dialogue.fallbackReason, "provider_timeout");
+});
+
+test("dialogue render blocks overlapping calls for the same session", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  let releaseFirst;
+  let calls = 0;
+  const sharedSession = {
+    id: "sample-foods-render-concurrency",
+    scenarioId: hardRejectionScenario.id,
+    turns: [
+      { role: "persona", text: hardRejectionScenario.persona.openingLine },
+      { role: "user", text: "hey this is James" },
+    ],
+  };
+  const first = generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: sharedSession,
+    repMessage: "hey this is James",
+    renderProvider: async () => {
+      calls += 1;
+      return new Promise((resolve) => {
+        releaseFirst = () => resolve({ text: "James from where, and what company is this?", provider: "fake_llm" });
+      });
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const second = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: sharedSession,
+    repMessage: "hey this is James",
+    renderProvider: async () => {
+      calls += 1;
+      return { text: "Should not render", provider: "fake_llm" };
+    },
+  });
+
+  releaseFirst();
+  const firstReply = await first;
+
+  assert.equal(calls, 1);
+  assert.equal(second.provider, "flow_guard");
+  assert.equal(second.dialogue.renderedBy, "fallback");
+  assert.equal(second.dialogue.fallbackReason, "concurrency_limit");
+  assert.equal(firstReply.provider, "fake_llm");
+  assert.equal(firstReply.dialogue.renderedBy, "llm");
+});
+
+test("dialogue render blocks overlapping calls for the same user across sessions", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_USER = "1";
+
+  let releaseFirst;
+  let calls = 0;
+  const makeSession = (id) => ({
+    id,
+    repId: "rep-1",
+    scenarioId: hardRejectionScenario.id,
+    turns: [
+      { role: "persona", text: hardRejectionScenario.persona.openingLine },
+      { role: "user", text: "hey this is James" },
+    ],
+  });
+  const first = generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: makeSession("sample-foods-user-concurrency-1"),
+    repMessage: "hey this is James",
+    renderProvider: async () => {
+      calls += 1;
+      return new Promise((resolve) => {
+        releaseFirst = () => resolve({ text: "James from where, and what company is this?", provider: "fake_llm" });
+      });
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const second = await generateCustomerReply({
+    scenario: hardRejectionScenario,
+    session: makeSession("sample-foods-user-concurrency-2"),
+    repMessage: "hey this is James",
+    renderProvider: async () => {
+      calls += 1;
+      return { text: "Should not render", provider: "fake_llm" };
+    },
+  });
+
+  releaseFirst();
+  await first;
+
+  assert.equal(calls, 1);
+  assert.equal(second.provider, "flow_guard");
+  assert.equal(second.dialogue.renderedBy, "fallback");
+  assert.equal(second.dialogue.fallbackReason, "user_concurrency_limit");
 });
 
 test("flow guard bypasses OpenClaw when first reply has no call context", async () => {

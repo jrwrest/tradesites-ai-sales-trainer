@@ -135,6 +135,13 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
 | `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. |
 | `CODEX_BRAIN_COMMAND` | empty | Optional local command that receives JSON and returns a customer reply. |
+| `DIALOGUE_MANAGER_ENABLED` | empty | Enables dialogue-state guardrails. |
+| `DIALOGUE_LLM_RENDER_ENABLED` | empty | Sends dialogue-manager and flow-guard replies through the configured provider before fallback. Keep off until tested. |
+| `DIALOGUE_LLM_RENDER_TIMEOUT_MS` | `10000` | Short timeout for per-turn dialogue rendering. |
+| `DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION` | empty | Set to `1` to retry once when rendered text violates the dialogue contract. |
+| `DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_SESSION` | `1` | Maximum overlapping dialogue render calls for one session. |
+| `DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_USER` | `2` | Maximum overlapping dialogue render calls for one user. |
+| `DIALOGUE_LLM_RENDER_MAX_CONCURRENT_GLOBAL` | `10` | Maximum overlapping dialogue render calls for this Node process. |
 | `CODEX_MODEL` | provider-defined | Optional model hint used by `scripts/codex-brain.mjs`. |
 
 ## Customer Brain Options
@@ -156,6 +163,17 @@ CODEX_BRAIN_COMMAND='["node","scripts/codex-brain.mjs"]' npm start
 ```
 
 Command providers receive transcript and scenario context on stdin. Do not use model-backed providers with private transcripts unless you are comfortable with that provider seeing the conversation.
+
+Dialogue rendering is optional and off by default. When enabled, guarded replies still keep their deterministic fallback, but the configured OpenClaw or command provider writes the natural customer wording:
+
+```bash
+DIALOGUE_MANAGER_ENABLED=1 \
+DIALOGUE_LLM_RENDER_ENABLED=1 \
+DIALOGUE_LLM_RENDER_TIMEOUT_MS=10000 \
+npm start
+```
+
+Check `/api/health` before canarying. It should show `dialogueRendering.enabled`, `dialogueRendering.provider`, `dialogueRendering.timeoutMs`, concurrency limits, and render stats.
 
 ## Test And Eval Commands
 

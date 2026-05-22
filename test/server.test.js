@@ -92,10 +92,85 @@ test("serves scenarios and health", async () => {
   assert.equal(health.body.auth.signupEnabled, false);
   assert.equal(health.body.auth.signupMode, "disabled");
   assert.equal(health.body.auth.pocketBaseUrl, undefined);
+  assert.equal(health.body.dialogueRendering.enabled, false);
+  assert.equal(health.body.dialogueRendering.timeoutMs, 10000);
+  assert.equal(health.body.dialogueRendering.maxConcurrentPerSession, 1);
+  assert.equal(health.body.dialogueRendering.maxConcurrentPerUser, 2);
+  assert.equal(health.body.dialogueRendering.maxConcurrentGlobal, 10);
+  assert.equal(typeof health.body.dialogueRendering.stats.attempts, "number");
 
   const scenarios = await request("/api/scenarios");
   assert.equal(scenarios.response.status, 200);
   assert.ok(scenarios.body.scenarios.length >= 1);
+});
+
+test("health exposes dialogue render flag and timeout", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS = "9000";
+
+  const health = await request("/api/health");
+
+  assert.equal(health.response.status, 200);
+  assert.equal(health.body.dialogueRendering.enabled, true);
+  assert.equal(health.body.dialogueRendering.provider, "mock");
+  assert.equal(health.body.dialogueRendering.timeoutMs, 9000);
+  assert.equal(health.body.dialogueRendering.maxConcurrentPerSession, 1);
+  assert.equal(typeof health.body.dialogueRendering.stats.fallbacks, "number");
+
+  delete process.env.DIALOGUE_LLM_RENDER_ENABLED;
+  delete process.env.DIALOGUE_LLM_RENDER_TIMEOUT_MS;
+});
+
+test("API persists LLM-rendered dialogue metadata on customer turns", async () => {
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+  const app = createApp({
+    authRequired: false,
+    customerReplyRenderProvider: async () => ({
+      text: "James from where, and what company is this?",
+      mood: "busy",
+      provider: "fake_llm",
+    }),
+  });
+  let localServer;
+  try {
+    await new Promise((resolve) => {
+      localServer = app.listen(0, "127.0.0.1", resolve);
+    });
+    const localBaseUrl = `http://127.0.0.1:${localServer.address().port}`;
+    const localRequest = async (pathName, options = {}) => {
+      const response = await fetch(`${localBaseUrl}${pathName}`, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options,
+      });
+      const body = await response.json().catch(() => null);
+      return { response, body };
+    };
+
+    const created = await localRequest("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ scenarioId: "commercial-solar-rejection" }),
+    });
+    assert.equal(created.response.status, 201);
+
+    const message = await localRequest(`/api/sessions/${created.body.session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({ text: "hey this is James" }),
+    });
+    assert.equal(message.response.status, 200);
+    assert.equal(message.body.reply.provider, "fake_llm");
+    assert.equal(message.body.reply.dialogue.renderedBy, "llm");
+    assert.equal(message.body.reply.dialogue.rendererProvider, "fake_llm");
+    assert.equal(message.body.reply.dialogue.fallbackReason, null);
+    assert.equal(message.body.session.state.dialogue.renderedBy, "llm");
+
+    const loaded = await localRequest(`/api/sessions/${created.body.session.id}`);
+    const lastTurn = loaded.body.session.turns[loaded.body.session.turns.length - 1];
+    assert.equal(lastTurn.dialogue.renderedBy, "llm");
+    assert.equal(lastTurn.dialogue.rendererProvider, "fake_llm");
+  } finally {
+    delete process.env.DIALOGUE_LLM_RENDER_ENABLED;
+    if (localServer) await new Promise((resolve) => localServer.close(resolve));
+  }
 });
 
 test("serves public home page", async () => {

@@ -84,9 +84,40 @@ test("OpenClaw gateway brain runs through websocket RPC", async () => {
     assert.equal(reply.provider, "openclaw");
     assert.equal(reply.mood, "impatient");
     assert.match(reply.text, /requirement for solar/);
-    assert.equal(gateway.requests[0].method, "connect");
-    assert.equal(gateway.requests[0].params.auth.token, "test-token");
+  assert.equal(gateway.requests[0].method, "connect");
+  assert.equal(gateway.requests[0].params.auth.token, "test-token");
+  assert.equal(gateway.requests[1].method, "agent");
+  assert.equal(gateway.requests[1].params.timeout, 2);
+  } finally {
+    delete process.env.OPENCLAW_GATEWAY_URL;
+    delete process.env.OPENCLAW_GATEWAY_TOKEN;
+    delete process.env.OPENCLAW_GATEWAY_TIMEOUT_MS;
+    await gateway.close();
+  }
+});
+
+test("OpenClaw gateway brain accepts a per-call timeout override", async () => {
+  const gateway = await startFakeGateway();
+  process.env.OPENCLAW_GATEWAY_URL = gateway.url;
+  process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
+  process.env.OPENCLAW_GATEWAY_TIMEOUT_MS = "45000";
+
+  try {
+    await runOpenClawBrain(
+      {
+        instruction: "reply as customer",
+        scenario: getScenario("commercial-solar-rejection"),
+        sessionId: "test-session",
+        transcript: [],
+        latestRepMessage: "Have you heard of solar PPA?",
+      },
+      { timeoutMs: 7000 },
+    );
+
     assert.equal(gateway.requests[1].method, "agent");
+    assert.equal(gateway.requests[1].params.timeout, 7);
+    assert.equal(gateway.requests[2].method, "agent.wait");
+    assert.equal(gateway.requests[2].params.timeoutMs, 7000);
   } finally {
     delete process.env.OPENCLAW_GATEWAY_URL;
     delete process.env.OPENCLAW_GATEWAY_TOKEN;
