@@ -52,7 +52,7 @@ function latestRepTurnMatches({ session, repMessage }) {
 }
 
 function hasEarlyCallContext(text = "") {
-  return /\b(solar|energy|electricity|ppa|power purchase|commercial|site|roof|renewable|installer|solar installer list|company|business|calling about|reason for (the )?call|regarding|speak with|talking to|emailed|email|sent you|20 seconds|twenty seconds|quick question)\b/i.test(
+  return /\b(solar|energy|electricity|ppa|power purchase|commercial|site|roof|renewable|installer|solar installer list|company|business|blue swans|manufacturer|manufacturing|power payback|report|calling about|reason for (the )?call|regarding|speak with|talking to|emailed|email|sent you|20 seconds|twenty seconds|quick question)\b/i.test(
     text,
   );
 }
@@ -391,6 +391,13 @@ function matchesForbiddenTopic(text, topic) {
 
 function matchesRequiredAction(text, contract) {
   const normalized = String(text || "");
+  if (contract.customerAction === "grant_brief_permission") {
+    return (
+      /\b(alright|okay|fine|go on|brief|20 seconds|twenty seconds|quick|checking|report|relevant)\b/i.test(
+        normalized,
+      ) && !/\bjust send me|send me the information first\b/i.test(normalized)
+    );
+  }
   if (contract.customerAction === "answer_routing_question") {
     return /\b(possibly|maybe|not directly|depends|right person|person|look after|handle|deal with|decision|energy|site|what did you send|what is this about|short version|point you|someone)\b/i.test(
       normalized,
@@ -516,6 +523,10 @@ function withDialogueTrace(reply, trace) {
 }
 
 async function maybeRenderDialogueReply({ scenario, session, repMessage, reply, renderProvider }) {
+  if (reply.dialogue?.customerAction === "end_call" || reply.dialogue?.customerAction === "repeat_hard_no") {
+    return reply;
+  }
+
   const provider = renderProvider || getDefaultRenderProvider();
   if (!isDialogueLlmRenderEnabled() || !provider) return reply;
 

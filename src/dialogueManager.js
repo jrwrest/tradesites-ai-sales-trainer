@@ -14,6 +14,14 @@ const CONTEXT_REPAIR_REPLIES = [
   "My site? Sorry, who are you calling from?",
 ];
 
+const MANUFACTURER_REPORT_ID = "manufacturer-power-payback-report";
+
+const MANUFACTURER_PERMISSION_REPLIES = [
+  "Alright, twenty seconds. What exactly are you checking in this report?",
+  "Okay, keep it brief. What would the report actually tell us?",
+  "Go on then, but be specific. What are you checking for BSB?",
+];
+
 function stableIndex(seedText, modulo) {
   const hash = Array.from(String(seedText || "")).reduce(
     (total, char) => (total * 31 + char.charCodeAt(0)) >>> 0,
@@ -40,7 +48,7 @@ function isCleanExit(text = "") {
 }
 
 function answersExistingSolarObjection(text = "") {
-  return /\b(maximi[sz](?:e|ing)|maximum|most of it|current system|covering|output|performance|expansion|battery|another site|unmet demand|check (?:that|whether|if))\b/i.test(
+  return /\b(maximi[sz](?:e|ing)|maximum|most of it|current system|covering|output|performance|expansion|battery|another site|unmet demand|remaining roof|usage profile|funded structure|stack up|check (?:that|whether|if)|checking that)\b/i.test(
     text,
   );
 }
@@ -93,7 +101,15 @@ function asksQuestionBackInsteadOfAnswering(text = "") {
   );
 }
 
-function classifyRepTurn({ session, repMessage }) {
+function isManufacturerReportScenario(scenario) {
+  return scenario?.id === MANUFACTURER_REPORT_ID || scenario?.objectionPlaybookId === MANUFACTURER_REPORT_ID;
+}
+
+function isExistingSolarObjection(id) {
+  return id === "already-have-solar" || id === "power-payback-already-have-panels";
+}
+
+function classifyRepTurn({ scenario, session, repMessage }) {
   const latestCustomer = latestCustomerTurn(session);
 
   if (hasHardNo(session.turns || [])) {
@@ -123,7 +139,7 @@ function classifyRepTurn({ session, repMessage }) {
     };
   }
 
-  if (latestCustomer?.objectionId === "already-have-solar" && answersExistingSolarObjection(repMessage)) {
+  if (isExistingSolarObjection(latestCustomer?.objectionId) && answersExistingSolarObjection(repMessage)) {
     return {
       label: "objection_answer",
       confidence: 0.88,
@@ -186,6 +202,7 @@ function classifyRepTurn({ session, repMessage }) {
 
 function buildDialogueReply({ scenario, session, repMessage }) {
   const classification = classifyRepTurn({ scenario, session, repMessage });
+  const isManufacturerReport = isManufacturerReportScenario(scenario);
 
   if (classification.label === "routing_question") {
     return {
@@ -253,9 +270,29 @@ function buildDialogueReply({ scenario, session, repMessage }) {
     };
   }
 
-  if (classification.activeObjectionId === "already-have-solar") {
+  if (isManufacturerReport && classification.label === "permission_ask") {
     return {
-      text: "Possibly, but what would you actually need to check? We already monitor the system.",
+      text: MANUFACTURER_PERMISSION_REPLIES[
+        stableIndex(`${session.id}:${repMessage}`, MANUFACTURER_PERMISSION_REPLIES.length)
+      ],
+      mood: "busy",
+      provider: "dialogue_manager",
+      dialogue: {
+        repAct: classification.label,
+        customerAction: "grant_brief_permission",
+        state: "opening_permission",
+        confidence: classification.confidence,
+        reason: classification.reason,
+        schedulerBlocked: true,
+      },
+    };
+  }
+
+  if (isExistingSolarObjection(classification.activeObjectionId)) {
+    return {
+      text: isManufacturerReport
+        ? "Possibly. If the current panels already cover the load, what would your report check beyond that?"
+        : "Possibly, but what would you actually need to check? We already monitor the system.",
       mood: "guarded",
       provider: "dialogue_manager",
       objectionId: classification.activeObjectionId,
