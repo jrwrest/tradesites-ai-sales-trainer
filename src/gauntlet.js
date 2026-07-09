@@ -1,4 +1,4 @@
-const { getObjectionById } = require("./objectionPlaybook");
+const { getObjectionById, getPlaybook } = require("./objectionPlaybook");
 
 const GAUNTLET_POOL = [
   { objectionId: "send-info", nearMissFamily: "dismissal" },
@@ -11,9 +11,30 @@ const GAUNTLET_POOL = [
   { objectionId: "budget-free-claim", nearMissFamily: "commercial-risk" },
 ];
 
-function generateGauntletPlan({ rounds = 5 } = {}) {
+function familyForObjection(objection) {
+  if (objection.id.includes("send-info")) return "dismissal";
+  if (objection.type === "hard_no") return "dismissal";
+  if (["authority", "process"].includes(objection.type)) return "authority-route";
+  if (objection.type === "existing_solution") return "existing-solution";
+  if (objection.type === "timing") return "timing";
+  if (objection.type === "commercial_risk") return "commercial-risk";
+  if (objection.type === "qualification") return "qualification";
+  return objection.type || "objection";
+}
+
+function buildGauntletPool(playbookId) {
+  if (!playbookId || playbookId === "enterprise-commercial-solar") return [...GAUNTLET_POOL];
+  const playbook = getPlaybook(playbookId);
+  if (!playbook) return GAUNTLET_POOL;
+  return playbook.objections.map((objection) => ({
+    objectionId: objection.id,
+    nearMissFamily: familyForObjection(objection),
+  }));
+}
+
+function generateGauntletPlan({ rounds = 5, playbookId = "enterprise-commercial-solar" } = {}) {
   const selected = [];
-  const remaining = [...GAUNTLET_POOL];
+  const remaining = buildGauntletPool(playbookId);
   while (selected.length < rounds && remaining.length) {
     const lastType = selected[selected.length - 1]?.type;
     const index = remaining.findIndex((item) => getObjectionById(item.objectionId).type !== lastType);
@@ -40,7 +61,7 @@ function scoreGauntletAnswer(text) {
   let score = 2;
   if (/\b(fair|understand|understood|makes sense|good question|completely)\b/.test(value)) score += 2;
   if (/\?/.test(value) || /\b(can i ask|who|what|how|which)\b/.test(value)) score += 2;
-  if (/\b(route|process|owner|landlord|procurement|priority|site|fit|close this off)\b/.test(value)) score += 2;
+  if (/\b(route|process|owner|landlord|procurement|priority|site|fit|close this off|50,?000|electricity spend|report|diagnostic|card on file|10%|ten percent)\b/.test(value)) score += 2;
   if (/\b(free|guaranteed|definitely|obviously)\b/.test(value)) score -= 2;
   return Math.max(0, Math.min(10, score));
 }

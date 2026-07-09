@@ -13,11 +13,21 @@ const SKILLS = [
   "incumbent_handling",
   "timing_followup",
   "hard_no_clean_exit",
+  "electricity_spend_gate",
+  "site_control_gate",
+  "decision_process_map",
+  "paid_report_close",
+  "risk_reversal_fallback",
   "next_step_close",
 ];
 
 const DRILL_PRIORITY = [
   "hard_no_clean_exit",
+  "electricity_spend_gate",
+  "site_control_gate",
+  "decision_process_map",
+  "paid_report_close",
+  "risk_reversal_fallback",
   "landlord_tenant_routing",
   "procurement_navigation",
   "incumbent_handling",
@@ -80,7 +90,8 @@ function scoreHardNoExit(turns) {
   return cleanExit ? 7 : 3;
 }
 
-function buildSkillScores({ turns, categories }) {
+function buildSkillScores({ turns, categories, scenario = null }) {
+  const isManufacturerReport = scenario?.id === "manufacturer-power-payback-report";
   const repText = turnText(turns, "user");
   const customerText = turnText(turns, "persona");
   const permissionAsked = /\b(can i take|could i take|do you have|is now okay|is now ok|quick question|permission)\b/.test(
@@ -99,6 +110,23 @@ function buildSkillScores({ turns, categories }) {
   const nextStep = /\b(meeting|call|next step|book|schedule|review|audit|send|email|tomorrow|today|monday|tuesday|wednesday|thursday|friday)\b/.test(
     repText,
   );
+  const electricitySpendGate =
+    /\b(50,?000|fifty thousand|electricity spend|electricity bill|annual electricity|year on electricity|per year on electricity|roughly above|above or below|energy spend|power spend|kwh|kilowatt)\b/.test(
+      repText,
+    );
+  const siteControlGate = /\b(own|owned|lease|leased|landlord|building owner|freeholder|site control|control the site|roof owner|property owner)\b/.test(
+    repText,
+  );
+  const decisionProcessMap = /\b(finance|procurement|board|director|decision|sign off|approve|approval|who else|who would|who normally|stakeholder|estates)\b/.test(
+    repText,
+  );
+  const paidReportClose =
+    /\b(report|diagnostic|power payback)\b/.test(repText) &&
+    /\b(500|five hundred|gbp 500|pay|paid|payment|card|invoice|credited back|credit back|credited)\b/.test(repText);
+  const riskReversalFallback =
+    /\b(0 down|zero down|nothing down|card on file|only pay|only invoice|10%|ten percent|at least 10|savings threshold|if the report shows)\b/.test(
+      repText,
+    );
 
   return {
     schemaVersion: 1,
@@ -137,6 +165,11 @@ function buildSkillScores({ turns, categories }) {
     }),
     timing_followup: nextStep ? 7 : 3,
     hard_no_clean_exit: scoreHardNoExit(turns),
+    electricity_spend_gate: isManufacturerReport ? (electricitySpendGate ? 8 : 4) : 6,
+    site_control_gate: isManufacturerReport ? (siteControlGate ? 8 : 4) : 6,
+    decision_process_map: isManufacturerReport ? (decisionProcessMap ? 8 : 4) : 6,
+    paid_report_close: isManufacturerReport ? (paidReportClose ? 8 : 3) : 6,
+    risk_reversal_fallback: isManufacturerReport ? (riskReversalFallback ? 8 : 4) : 6,
     next_step_close: clampScore(categories.close),
   };
 }

@@ -11,6 +11,7 @@ function summarizeHelpAccuracy(helpAttempts = []) {
 }
 
 function scoreTranscript({ scenario, turns, helpAttempts = [] }) {
+  const isManufacturerReport = scenario.id === "manufacturer-power-payback-report";
   const repTurns = turns.filter((turn) => turn.role === "user" || turn.speaker === "rep");
   const repText = repTurns.map((turn) => turn.text.toLowerCase()).join(" ");
   const customerText = turns
@@ -20,17 +21,20 @@ function scoreTranscript({ scenario, turns, helpAttempts = [] }) {
 
   const askedQuestions = (repText.match(/\?/g) || []).length;
   const mentionedNextStep =
-    /\b(meeting|call|next step|book|schedule|review|audit|tomorrow|today|monday|tuesday|wednesday|thursday|friday)\b/.test(
+    /\b(meeting|call|next step|book|schedule|review|audit|report|diagnostic|card|payment|invoice|tomorrow|today|monday|tuesday|wednesday|thursday|friday)\b/.test(
       repText,
     );
   const handledObjection =
     /\b(understand|understood|fair|makes sense|previous|tried|expensive|send|information|busy|referrals|lead quality)\b/.test(
       repText,
     );
-  const discovery =
+  const baseDiscovery =
     /\b(current|today|how do you|what happens|lead|enquir|review|referral|follow.?up|competitor|problem|challenge)\b/.test(
       repText,
     );
+  const manufacturerDiscovery =
+    /\b(electricity|energy|power|spend|bill|site|roof|own|lease|finance|decision)\b/.test(repText);
+  const discovery = baseDiscovery || (isManufacturerReport && manufacturerDiscovery);
   const listened =
     /\b(you mentioned|sounds like|so|because|that means|if i heard you)\b/.test(repText) ||
     repTurns.length >= 3;
@@ -82,7 +86,27 @@ function scoreTranscript({ scenario, turns, helpAttempts = [] }) {
   if (mentionedNextStep) strengths.push("You pushed toward a concrete next action.");
 
   const helpAccuracy = summarizeHelpAccuracy(helpAttempts);
-  const skillScores = buildSkillScores({ turns, categories });
+  const skillScores = buildSkillScores({ turns, categories, scenario });
+  if (isManufacturerReport) {
+    if (skillScores.electricity_spend_gate <= 5) {
+      missedOpportunities.push("Qualify whether the site is roughly above GBP 50,000 per year in electricity spend.");
+    }
+    if (skillScores.site_control_gate <= 5) {
+      missedOpportunities.push("Check whether they own, lease, or control the site before selling the report.");
+    }
+    if (skillScores.decision_process_map <= 5) {
+      missedOpportunities.push("Map who would approve the GBP 500 diagnostic before asking for payment.");
+    }
+    if (skillScores.paid_report_close <= 5) {
+      missedOpportunities.push("Ask clearly for the GBP 500 Manufacturer's Power Payback Report close.");
+    }
+    if (skillScores.paid_report_close >= 7) {
+      strengths.push("You made the paid report close explicit instead of hiding behind a free assessment.");
+    }
+    if (skillScores.risk_reversal_fallback >= 7) {
+      strengths.push("You used the GBP 0-down 10% savings fallback as a risk reversal.");
+    }
+  }
   const evaluation = {
     scenarioId: scenario.id,
     scenarioName: scenario.name,

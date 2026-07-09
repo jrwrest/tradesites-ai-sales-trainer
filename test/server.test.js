@@ -422,6 +422,24 @@ test("gauntlet session persists round results and summary", async () => {
   assert.equal(typeof current.gauntlet.summary.weakestFamily, "string");
 });
 
+test("gauntlet endpoint uses selected manufacturer report scenario", async () => {
+  const created = await request("/api/gauntlets", {
+    method: "POST",
+    body: JSON.stringify({
+      scenarioId: "manufacturer-power-payback-report",
+      rounds: 3,
+    }),
+  });
+
+  assert.equal(created.response.status, 201);
+  assert.equal(created.body.scenario.id, "manufacturer-power-payback-report");
+  assert.ok(
+    created.body.session.gauntlet.plan.rounds.every((round) =>
+      round.objectionId.startsWith("power-payback-"),
+    ),
+  );
+});
+
 test("review queue endpoint and coach notes preserve transcript", async () => {
   const created = await request("/api/sessions", {
     method: "POST",

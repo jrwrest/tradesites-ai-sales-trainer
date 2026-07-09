@@ -17,6 +17,16 @@ test("gauntlet generator represents near-miss objection families", () => {
   assert.ok(families.has("authority-route"));
 });
 
+test("gauntlet generator can drill the manufacturer report playbook", () => {
+  const plan = generateGauntletPlan({
+    rounds: 5,
+    playbookId: "manufacturer-power-payback-report",
+  });
+
+  assert.equal(plan.rounds.length, 5);
+  assert.ok(plan.rounds.every((round) => round.objectionId.startsWith("power-payback-")));
+});
+
 test("gauntlet answer scoring rewards acknowledgement and next move", () => {
   const weak = scoreGauntletAnswer("Okay.");
   const strong = scoreGauntletAnswer("Fair point. Can I ask one quick question so I route this properly?");
