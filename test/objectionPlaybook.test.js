@@ -4,12 +4,14 @@ const {
   buildCoachingSuggestion,
   enterpriseObjectionPlaybook,
   hasHardNo,
+  manufacturerPowerPaybackPlaybook,
   recommendedMoveForObjection,
   selectNextObjection,
 } = require("../src/objectionPlaybook");
 const { getScenario } = require("../src/scenarios");
 
 const scenario = getScenario("enterprise-commercial-solar");
+const reportScenario = getScenario("manufacturer-power-payback-report");
 
 function session(turns = [], id = "enterprise-test") {
   return {
@@ -23,6 +25,20 @@ test("enterprise scenario has objection playbook metadata", () => {
   assert.equal(scenario.objectionPlaybookId, "enterprise-commercial-solar");
   assert.ok(scenario.persona.objections.length >= 8);
   assert.ok(scenario.persona.successConditions.length >= 4);
+});
+
+test("manufacturer report scenario has dedicated paid-report playbook", () => {
+  assert.equal(reportScenario.objectionPlaybookId, "manufacturer-power-payback-report");
+  assert.ok(
+    reportScenario.persona.successConditions.some((condition) =>
+      condition.includes("GBP 500 report"),
+    ),
+  );
+  assert.ok(
+    manufacturerPowerPaybackPlaybook.objections.some((objection) =>
+      objection.text.includes("GBP 500"),
+    ),
+  );
 });
 
 test("objection selector returns bounded non-repeating objections", () => {
@@ -106,4 +122,38 @@ test("each enterprise objection has a recommended retrieval move", () => {
   for (const objection of enterpriseObjectionPlaybook.objections) {
     assert.match(recommendedMoveForObjection(objection), /^(acknowledge|clarify|ask_permission|qualify|route|commercial_explain|exit)$/);
   }
+});
+
+test("manufacturer report coaching uses report-specific fallback prompts", () => {
+  const suggestion = buildCoachingSuggestion({
+    scenario: reportScenario,
+    session: {
+      id: "report-test",
+      scenarioId: reportScenario.id,
+      turns: [
+        { role: "persona", text: reportScenario.persona.openingLine },
+        { role: "user", text: "James from Solar Future Scotland. Can I take 20 seconds?" },
+      ],
+    },
+  });
+
+  assert.equal(suggestion.source, "manufacturer-power-payback-report");
+  assert.match(suggestion.tryThis, /GBP 50,000/i);
+});
+
+test("manufacturer report objection selector uses paid-report objections", () => {
+  const objection = selectNextObjection({
+    scenario: reportScenario,
+    session: {
+      id: "report-objection-test",
+      scenarioId: reportScenario.id,
+      turns: [
+        { role: "persona", text: reportScenario.persona.openingLine },
+        { role: "user", text: "James from Solar Future Scotland about a Power Payback Report for manufacturers. Can I take 20 seconds?" },
+      ],
+    },
+    repMessage: "Can I take 20 seconds?",
+  });
+
+  assert.ok(objection.id.startsWith("power-payback-"));
 });

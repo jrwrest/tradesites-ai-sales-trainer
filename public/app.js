@@ -747,9 +747,13 @@ async function startGauntlet() {
   state.waiting = true;
   setButtons();
   try {
+    const scenarioId = elements.scenarioSelect.value;
     const payload = await api("/api/gauntlets", {
       method: "POST",
-      body: JSON.stringify({ rounds: new URLSearchParams(window.location.search).has("smoke") ? 3 : 5 }),
+      body: JSON.stringify({
+        scenarioId,
+        rounds: new URLSearchParams(window.location.search).has("smoke") ? 3 : 5,
+      }),
     });
     state.session = payload.session;
     state.scenario = payload.scenario;

@@ -1,5 +1,49 @@
 const scenarios = [
   {
+    id: "manufacturer-power-payback-report",
+    name: "Manufacturer Power Payback Report",
+    industry: "UK manufacturers and industrial businesses",
+    offerContext:
+      "You are calling UK manufacturers about a Manufacturer's Power Payback Report that checks whether solar, PPAs, battery, or tariff actions could reduce electricity costs. The primary close is a GBP 500 paid report, credited back against a project. The fallback is GBP 0 down with card on file, payable only if the report shows at least 10% savings.",
+    goal: "Qualify electricity spend, site control, and the decision route, then sell the GBP 500 report or the qualified GBP 0-down fallback.",
+    difficulty: "expert",
+    objectionPlaybookId: "manufacturer-power-payback-report",
+    persona: {
+      name: "Stuart Shields",
+      role: "Director at a structural steel manufacturer",
+      mood: "Busy, numbers-led, and wary of another solar pitch",
+      openingLine: "Stuart speaking. Who is this?",
+      personality:
+        "Commercially practical and blunt. He will listen if the rep makes the call relevant to energy cost, site control, and a clear paid report, but he rejects vague free assessments quickly.",
+      painPoints: [
+        "Electricity spend is meaningful but exact bills are not in front of him",
+        "The business has heard generic solar approaches before",
+        "Any project would need a credible business case before internal time is spent",
+        "Existing roof equipment or panels may already be part of the site story",
+      ],
+      hiddenContext:
+        "Stuart may consider the report if the rep qualifies GBP 50k+ electricity spend, asks about site ownership/control, maps the decision route, and frames the GBP 500 report as a small paid diagnostic rather than a free quote.",
+      objections: [
+        "Is this just another solar sales call?",
+        "We might already have panels on the roof.",
+        "I do not have our electricity bill in front of me.",
+        "Why would we pay GBP 500 for a report?",
+        "Just send me the information first.",
+        "I would need to speak to finance before paying for anything.",
+        "We are too busy for another supplier review.",
+        "What happens if your report does not find any savings?",
+      ],
+      successConditions: [
+        "The rep states name, company, and reason for calling in one clear sentence.",
+        "The rep asks permission before discovery.",
+        "The rep qualifies GBP 50k+ electricity spend or a credible industrial usage proxy.",
+        "The rep checks ownership, lease, landlord, or site-control constraints.",
+        "The rep maps the decision route before asking for payment.",
+        "The rep asks for the GBP 500 report sale and can use the GBP 0-down 10% savings fallback without sounding evasive.",
+      ],
+    },
+  },
+  {
     id: "enterprise-commercial-solar",
     name: "Large Business Solar Decision-Maker",
     industry: "Large commercial and industrial businesses",

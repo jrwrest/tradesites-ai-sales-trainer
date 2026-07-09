@@ -508,8 +508,11 @@ function createApp(options = {}) {
 
   app.post("/api/gauntlets", async (req, res, next) => {
     try {
-      const scenario = getScenario("enterprise-commercial-solar");
-      const plan = generateGauntletPlan({ rounds: Number(req.body.rounds || 5) });
+      const scenario = getScenario(req.body.scenarioId || "enterprise-commercial-solar");
+      const plan = generateGauntletPlan({
+        rounds: Number(req.body.rounds || 5),
+        playbookId: scenario.objectionPlaybookId,
+      });
       const now = new Date().toISOString();
       const firstRound = plan.rounds[0];
       const session = {

@@ -153,6 +153,134 @@ const enterpriseObjectionPlaybook = {
   ],
 };
 
+const manufacturerPowerPaybackPlaybook = {
+  id: "manufacturer-power-payback-report",
+  name: "Manufacturer Power Payback Report Objection Gauntlet",
+  maxObjectionsPerCall: 6,
+  sourceNotes: [
+    "Treat the report as a paid diagnostic, not a free solar quote.",
+    "Qualify GBP 50k+ electricity spend, site control, and the decision route before closing.",
+    "If GBP 500 creates friction, use the GBP 0-down card-on-file fallback only after confirming fit.",
+    "Do not assume roof panels from satellite imagery; ask neutrally and let the prospect confirm.",
+  ],
+  objections: [
+    {
+      id: "power-payback-is-this-solar-call",
+      stage: "opener",
+      type: "gatekeeper",
+      triggerAfterTurns: 0,
+      text: "Is this just another solar sales call?",
+      coaching: [
+        "Acknowledge the concern without defending.",
+        "Frame the call as a quick power-cost fit check and paid report, not an install pitch.",
+        "Ask permission for one relevant question.",
+      ],
+      tryThis:
+        "Fair question. It is James from Solar Future Scotland. I am not calling to pitch an install today. We build a short Power Payback Report for manufacturers to see whether solar, PPA, battery, or tariff options are worth a proper look. Can I ask one quick question to see if it is even relevant?",
+    },
+    {
+      id: "power-payback-already-have-panels",
+      stage: "discovery",
+      type: "existing_solution",
+      triggerAfterTurns: 2,
+      text: "We might already have panels on the roof.",
+      coaching: [
+        "Do not claim the satellite image proves anything.",
+        "Ask whether the current setup covers enough daytime demand.",
+        "Look for expansion, battery, export, tariff, or another site rather than arguing.",
+      ],
+      tryThis:
+        "That may mean you have already taken the obvious first step. I did not want to assume from an image. Is the current setup covering most of your daytime load, or has anyone checked expansion, battery, export, or tariff savings recently?",
+    },
+    {
+      id: "power-payback-no-bill",
+      stage: "qualification",
+      type: "qualification",
+      triggerAfterTurns: 2,
+      text: "I do not have our electricity bill in front of me.",
+      coaching: [
+        "Do not ask for exact private figures immediately.",
+        "Use the GBP 50k annual spend threshold as a rough gate.",
+        "Explain that below the threshold it may not be worth their time.",
+      ],
+      tryThis:
+        "No problem, I would not expect you to have the bill open. Roughly, are you above or below about GBP 50,000 a year on electricity? If you are well below that, I would probably close this off rather than waste your time.",
+    },
+    {
+      id: "power-payback-why-pay",
+      stage: "commercial",
+      type: "commercial_risk",
+      triggerAfterTurns: 3,
+      text: "Why would we pay GBP 500 for a report?",
+      coaching: [
+        "Do not apologize for charging.",
+        "Position the fee as a filter for a site-specific commercial report.",
+        "Tie it to avoided wasted time and crediting it back if they proceed.",
+      ],
+      tryThis:
+        "Fair question. The reason it is paid is that it is not a generic brochure or free quote. We check the site, usage route, likely savings options, and whether a funded or capex route is worth pursuing. The GBP 500 is credited back if you proceed, so the real question is whether the possible saving is big enough to justify a proper diagnostic.",
+    },
+    {
+      id: "power-payback-send-info",
+      stage: "permission",
+      type: "dismissive",
+      triggerAfterTurns: 1,
+      text: "Just send me the information first.",
+      coaching: [
+        "Acknowledge the request.",
+        "Avoid sending a generic report pitch to an unqualified prospect.",
+        "Ask one gate question so the follow-up is relevant.",
+      ],
+      tryThis:
+        "Of course. So I send the right thing rather than a generic deck, can I ask one gate question first: is the site roughly above GBP 50,000 a year in electricity spend?",
+    },
+    {
+      id: "power-payback-finance-approval",
+      stage: "close",
+      type: "authority",
+      triggerAfterTurns: 4,
+      text: "I would need to speak to finance before paying for anything.",
+      coaching: [
+        "Respect the decision route.",
+        "Ask what finance would need to approve a small diagnostic.",
+        "Do not try to bypass finance; map the next step.",
+      ],
+      tryThis:
+        "Makes sense. For a GBP 500 diagnostic, what would finance need to see: the scope, the savings threshold, or who credits it back if the project proceeds?",
+    },
+    {
+      id: "power-payback-too-busy",
+      stage: "commercial",
+      type: "timing",
+      triggerAfterTurns: 3,
+      text: "We are too busy for another supplier review.",
+      coaching: [
+        "Agree that they should not run a supplier review without a strong reason.",
+        "Reframe the report as a way to avoid supplier time unless the numbers justify it.",
+        "Ask whether a short evidence-led review would be useful later.",
+      ],
+      tryThis:
+        "I agree, a supplier review is only worth doing if there is a strong enough number behind it. The point of the report is to avoid dragging your team into quotes unless the saving is real. If we kept your input to the minimum, would a report only be useful if it showed a 10% plus saving?",
+    },
+    {
+      id: "power-payback-no-savings",
+      stage: "close",
+      type: "commercial_risk",
+      triggerAfterTurns: 4,
+      text: "What happens if your report does not find any savings?",
+      coaching: [
+        "Use the risk reversal plainly.",
+        "Keep the fallback conditional on qualified fit.",
+        "Do not overpromise the result.",
+      ],
+      tryThis:
+        "If we have qualified the site and that is your main concern, we can do the GBP 0-down version: card on file, and you only pay if the report shows at least 10% savings. If it does not, you have not paid for a poor-fit report.",
+    },
+  ],
+};
+
+const PLAYBOOKS = [enterpriseObjectionPlaybook, manufacturerPowerPaybackPlaybook];
+
 const HARD_NO_PATTERN =
   /\b(take (us|me) off|remove (us|me)|do not call|don't call|no requirement|not interested|wasting your time|stop calling)\b/i;
 
@@ -167,11 +295,15 @@ const HELP_MOVES = [
 ];
 
 function getPlaybook(id) {
-  return id === enterpriseObjectionPlaybook.id ? enterpriseObjectionPlaybook : null;
+  return PLAYBOOKS.find((playbook) => playbook.id === id) || null;
 }
 
 function getObjectionById(id) {
-  return enterpriseObjectionPlaybook.objections.find((objection) => objection.id === id) || null;
+  for (const playbook of PLAYBOOKS) {
+    const objection = playbook.objections.find((item) => item.id === id);
+    if (objection) return objection;
+  }
+  return null;
 }
 
 function inferStage(turns) {
@@ -197,7 +329,7 @@ function seededIndex(seedText, modulo) {
 }
 
 function hasCallContext(text = "") {
-  return /\b(solar|energy|ppa|power purchase|commercial|site|electricity|renewable|roof|installer|company|business|calling about|reason for (the )?call|20 seconds|twenty seconds)\b/i.test(
+  return /\b(solar|energy|ppa|power purchase|commercial|site|electricity|renewable|roof|installer|company|business|manufacturer|manufacturing|factory|power payback|report|electricity spend|calling about|reason for (the )?call|20 seconds|twenty seconds)\b/i.test(
     text,
   );
 }
@@ -239,7 +371,7 @@ function recommendedMoveForObjection(objection) {
   if (objection.terminal || objection.type === "hard_no") return "exit";
   if (objection.type === "commercial_risk") return "commercial_explain";
   if (["authority", "process", "complexity"].includes(objection.type)) return "route";
-  if (["existing_solution", "timing"].includes(objection.type)) return "qualify";
+  if (["existing_solution", "qualification", "timing"].includes(objection.type)) return "qualify";
   if (objection.type === "gatekeeper") return "ask_permission";
   if (objection.type === "dismissive") return "clarify";
   return "acknowledge";
@@ -267,6 +399,7 @@ function buildCoachingSuggestion({ scenario, session }) {
   const stage = inferStage(session.turns || []);
 
   if (objection) {
+    const playbook = getPlaybook(scenario.objectionPlaybookId);
     return {
       stage,
       objectionId: objection.id,
@@ -275,11 +408,72 @@ function buildCoachingSuggestion({ scenario, session }) {
       title: objection.terminal ? "Respect the hard no" : `Handle: ${objection.text}`,
       suggestions: objection.coaching,
       tryThis: objection.tryThis,
-      source: "enterprise-playbook",
+      source: playbook?.id || "playbook",
     };
   }
 
-  const fallback = {
+  const manufacturerFallback = {
+    opener: {
+      title: "Earn permission for the report",
+      suggestions: [
+        "State name, company, and why this is about power cost rather than a generic solar pitch.",
+        "Ask for a small amount of time.",
+        "Give them an easy out if the site is not a fit.",
+      ],
+      tryThis:
+        "It is James from Solar Future Scotland. I am calling about a Power Payback Report for manufacturers. If your electricity spend is not high enough, I can close it off. Can I take 20 seconds?",
+    },
+    permission: {
+      title: "Ask one gate question",
+      suggestions: [
+        "Do not pitch the report yet.",
+        "Qualify electricity spend first.",
+        "Use the GBP 50,000 annual spend threshold as the first filter.",
+      ],
+      tryThis: "Roughly, are you above or below about GBP 50,000 a year on electricity?",
+    },
+    discovery: {
+      title: "Qualify the business case",
+      suggestions: [
+        "Ask about electricity spend, site control, and existing roof/panel context.",
+        "Do not assume from satellite imagery.",
+        "Look for pain before mentioning the GBP 500 close.",
+      ],
+      tryThis:
+        "Has anyone recently checked whether the site is better suited to extra solar, battery, PPA, or tariff savings?",
+    },
+    qualification: {
+      title: "Map control and decision route",
+      suggestions: [
+        "Find whether they own, lease, or need landlord approval.",
+        "Ask who signs off a small diagnostic report.",
+        "Route finance/procurement instead of bypassing them.",
+      ],
+      tryThis: "Who would normally need to be involved before a GBP 500 diagnostic report could be approved?",
+    },
+    commercial: {
+      title: "Frame the GBP 500 report",
+      suggestions: [
+        "Explain why the report is paid.",
+        "Tie the fee to a site-specific diagnostic, not a brochure.",
+        "Mention it is credited back if they proceed.",
+      ],
+      tryThis:
+        "The GBP 500 is for a site-specific report, not a generic quote, and it is credited back if you proceed. Would the possible saving justify checking it properly?",
+    },
+    close: {
+      title: "Close or use the fallback",
+      suggestions: [
+        "Ask directly for the GBP 500 report if qualified.",
+        "If the fee is the blocker, use the GBP 0-down 10% savings fallback.",
+        "Do not offer the fallback before confirming fit.",
+      ],
+      tryThis:
+        "If the site is qualified, shall we put the GBP 500 report in motion? If the fee is the only concern, we can do GBP 0 down, card on file, and only invoice if it shows at least 10% savings.",
+    },
+  };
+
+  const enterpriseFallback = {
     opener: {
       title: "Earn permission",
       suggestions: [
@@ -340,12 +534,17 @@ function buildCoachingSuggestion({ scenario, session }) {
     },
   };
 
+  const fallback =
+    scenario.objectionPlaybookId === manufacturerPowerPaybackPlaybook.id
+      ? manufacturerFallback
+      : enterpriseFallback;
+
   return {
     stage,
     objectionId: null,
     objectionType: null,
     recommendedMove: recommendedMoveForStage(stage),
-    source: "enterprise-playbook",
+    source: scenario.objectionPlaybookId || "playbook",
     ...fallback[stage],
   };
 }
@@ -353,7 +552,9 @@ function buildCoachingSuggestion({ scenario, session }) {
 module.exports = {
   HARD_NO_PATTERN,
   HELP_MOVES,
+  PLAYBOOKS,
   enterpriseObjectionPlaybook,
+  manufacturerPowerPaybackPlaybook,
   getObjectionById,
   getPlaybook,
   inferStage,

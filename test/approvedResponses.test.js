@@ -17,3 +17,14 @@ test("findApprovedResponse returns a relevant example without hidden persona con
   assert.equal(example.objectionId, "send-info");
   assert.doesNotMatch(JSON.stringify(example).toLowerCase(), /hidden|secret|alex may engage/);
 });
+
+test("approved response bank includes manufacturer paid-report close examples", () => {
+  const example = findApprovedResponse({
+    objectionId: "power-payback-why-pay",
+    recommendedMove: "commercial_explain",
+  });
+
+  assert.equal(example.objectionId, "power-payback-why-pay");
+  assert.match(example.text, /GBP 500/i);
+  assert.match(example.text, /credited back/i);
+});
