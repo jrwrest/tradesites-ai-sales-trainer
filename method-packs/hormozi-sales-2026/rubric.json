@@ -20,7 +20,7 @@
     {
       "id": "respect_hard_no", "label": "Respect an explicit hard no", "sourceRefs": ["sales_behavior"],
       "failEvidence": ["continues persuasion after an unambiguous terminal no"],
-      "effect": { "capOverallScore": 39, "requiredDrillBehaviorId": "aaa_acknowledge" }
+      "effect": { "capOverallScore": 39, "requiredDrillBehaviorId": "hard_no_clean_exit" }
     },
     {
       "id": "truthful_claims", "label": "Use truthful claims and proof", "sourceRefs": ["before_sale", "sales_behavior"],

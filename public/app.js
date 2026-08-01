@@ -275,6 +275,13 @@ function renderScore(evaluation) {
   main.textContent = `${evaluation.overallScore}/10`;
   wrapper.append(main);
 
+  const methodMeta = document.createElement("p");
+  methodMeta.className = "muted";
+  const confidence = evaluation.methodEvaluation?.overallConfidence || "unknown";
+  const packVersion = evaluation.methodEvaluation?.methodPack?.version || "unversioned";
+  methodMeta.textContent = `Source-grounded method score · ${confidence} evidence confidence · pack ${packVersion}`;
+  wrapper.append(methodMeta);
+
   Object.entries(evaluation.categories).forEach(([name, value]) => {
     const row = document.createElement("div");
     row.className = "score-row";
@@ -291,13 +298,29 @@ function renderScore(evaluation) {
   feedback.textContent = evaluation.recommendedDrill;
   wrapper.append(feedback);
 
-  const drill = state.session?.assignedDrill || evaluation.assignedDrill;
+  const criticalGates = evaluation.methodEvaluation?.criticalGates || [];
+  const gateAlerts = criticalGates.filter((gate) => gate.status === "fail" || gate.status === "review");
+  if (gateAlerts.length) {
+    const gateList = document.createElement("ul");
+    gateAlerts.forEach((gate) => {
+      const item = document.createElement("li");
+      item.textContent = `${gate.status === "fail" ? "Gate failed" : "Needs review"}: ${gate.label}`;
+      gateList.append(item);
+    });
+    wrapper.append(gateList);
+  }
+
+  const drill = state.session?.methodDrill
+    || evaluation.methodEvaluation?.assignedDrill
+    || state.session?.assignedDrill
+    || evaluation.assignedDrill;
+  const drillId = drill?.behaviorId || drill?.skill;
   const drillBox = document.createElement("section");
   drillBox.className = "next-drill";
   const drillTitle = document.createElement("h3");
-  drillTitle.textContent = drill?.skill ? "Next Drill" : "No Drill Assigned";
+  drillTitle.textContent = drillId ? "Next Drill" : "No Drill Assigned";
   const drillSkill = document.createElement("strong");
-  drillSkill.textContent = drill?.skill ? drill.skill.replaceAll("_", " ") : "Keep practising";
+  drillSkill.textContent = drillId ? drillId.replaceAll("_", " ") : "Keep practising";
   const drillReason = document.createElement("p");
   drillReason.textContent = drill?.reason || "This call did not produce a specific weak-skill drill.";
   drillBox.append(drillTitle, drillSkill, drillReason);

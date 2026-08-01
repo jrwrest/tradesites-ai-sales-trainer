@@ -21,11 +21,11 @@
     }
   ],
   "expected": {
-    "overallScore": { "min": 4, "max": 6 },
-    "categories": {
-      "opener": { "min": 7, "max": 9 },
-      "discovery": { "min": 5, "max": 7 }
+    "method": {
+      "overallScore": { "min": 16, "max": 26 },
+      "behaviorLabels": { "ppp_proof": 0, "ppp_promise": 0, "ppp_plan": 3, "closer_clarify": 3, "closer_label": 0, "closer_overview_pain": 0 }
     },
+    "overallScore": { "min": 1, "max": 3 },
     "assignedDrillSkill": "next_step_close",
     "forbiddenLeakage": [
       "hiddenContext",

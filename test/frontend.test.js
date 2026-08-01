@@ -51,3 +51,13 @@ test("mic button lives beside send as an icon control", async () => {
   assert.ok(composer.indexOf('id="micBtn"') < composer.indexOf('id="sendBtn"'));
   assert.doesNotMatch(controls, /id="micBtn"/);
 });
+
+test("score card prioritizes the source-grounded method drill and confidence", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const renderScore = appJs.slice(appJs.indexOf("function renderScore("), appJs.indexOf("function renderCoaching("));
+
+  assert.ok(renderScore.indexOf("state.session?.methodDrill") < renderScore.indexOf("evaluation.assignedDrill"));
+  assert.match(renderScore, /methodEvaluation\?\.overallConfidence/);
+  assert.match(renderScore, /criticalGates/);
+  assert.match(renderScore, /drill\?\.behaviorId/);
+});

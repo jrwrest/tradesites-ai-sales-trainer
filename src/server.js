@@ -867,7 +867,9 @@ function createApp(options = {}) {
         scenario: getScenario(session.scenarioId),
         turns: session.turns,
         helpAttempts: session.helpAttempts || [],
+        methodPack,
       });
+      session.methodDrill = session.evaluation.methodEvaluation.assignedDrill;
       session.assignedDrill = session.evaluation.assignedDrill;
       session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill);
       await updateSkillMemory({ session, evaluation: session.evaluation });
@@ -993,7 +995,7 @@ function createApp(options = {}) {
     try {
       const scenario = getScenario(req.body.scenarioId);
       const turns = Array.isArray(req.body.turns) ? req.body.turns : [];
-      res.json({ evaluation: scoreTranscript({ scenario, turns }) });
+      res.json({ evaluation: scoreTranscript({ scenario, turns, methodPack }) });
     } catch (error) {
       next(error);
     }

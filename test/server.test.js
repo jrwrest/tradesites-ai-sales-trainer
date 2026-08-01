@@ -102,7 +102,7 @@ test("serves scenarios and health", async () => {
   assert.equal(typeof health.body.runtime.requests.total, "number");
   assert.deepEqual(health.body.methodPack, {
     id: "hormozi-sales-2026",
-    version: "1.0.0-beta.1",
+    version: "1.0.0-beta.2",
     status: "source-grounded-beta",
   });
 
@@ -327,7 +327,7 @@ test("typed call happy path persists turns and scores", async () => {
   assert.equal(created.body.session.repId, "local");
   assert.deepEqual(created.body.session.methodPack, {
     id: "hormozi-sales-2026",
-    version: "1.0.0-beta.1",
+    version: "1.0.0-beta.2",
   });
   assert.equal(created.body.session.turns.length, 1);
   assert.equal(created.body.session.turns[0].role, "persona");

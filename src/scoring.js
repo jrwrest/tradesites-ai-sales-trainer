@@ -1,4 +1,5 @@
 const { assignNextDrill, buildSkillScores } = require("./skills");
+const { evaluateMethod } = require("./methodEvaluator");
 
 function summarizeHelpAccuracy(helpAttempts = []) {
   const attempts = helpAttempts.length;
@@ -10,7 +11,7 @@ function summarizeHelpAccuracy(helpAttempts = []) {
   };
 }
 
-function scoreTranscript({ scenario, turns, helpAttempts = [] }) {
+function scoreTranscript({ scenario, turns, helpAttempts = [], methodPack }) {
   const isManufacturerReport = scenario.id === "manufacturer-power-payback-report";
   const repTurns = turns.filter((turn) => turn.role === "user" || turn.speaker === "rep");
   const repText = repTurns.map((turn) => turn.text.toLowerCase()).join(" ");
@@ -86,6 +87,7 @@ function scoreTranscript({ scenario, turns, helpAttempts = [] }) {
   if (mentionedNextStep) strengths.push("You pushed toward a concrete next action.");
 
   const helpAccuracy = summarizeHelpAccuracy(helpAttempts);
+  const methodEvaluation = evaluateMethod({ turns, scenario, methodPack });
   const skillScores = buildSkillScores({ turns, categories, scenario });
   if (isManufacturerReport) {
     if (skillScores.electricity_spend_gate <= 5) {
@@ -107,17 +109,31 @@ function scoreTranscript({ scenario, turns, helpAttempts = [] }) {
       strengths.push("You used the GBP 0-down 10% savings fallback as a risk reversal.");
     }
   }
+  const methodCategories = Object.fromEntries(
+    methodEvaluation.stages
+      .filter((stage) => stage.score !== null && stage.id !== "prepare")
+      .map((stage) => [stage.id, Math.round(stage.score / 10)]),
+  );
+  const legacyOverallScore = overall;
+  const legacyCategories = categories;
+  overall = Math.round(methodEvaluation.overallScore / 10);
   const evaluation = {
     scenarioId: scenario.id,
     scenarioName: scenario.name,
     overallScore: overall,
-    categories,
+    legacyOverallScore,
+    legacyCategories,
+    methodScore: methodEvaluation.overallScore,
+    methodEvaluation,
+    methodPack: methodEvaluation.methodPack,
+    categories: methodCategories,
     helpAccuracy,
     skillScores,
     strengths,
     missedOpportunities,
-    recommendedDrill:
-      missedOpportunities.length > 0
+    recommendedDrill: methodEvaluation.assignedDrill
+      ? methodEvaluation.assignedDrill.prompt
+      : missedOpportunities.length > 0
         ? "Run the same scenario again and focus only on the first missed opportunity."
         : "Increase the difficulty and practise handling sharper objections.",
   };

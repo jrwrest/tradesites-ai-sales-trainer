@@ -21,11 +21,11 @@
     }
   ],
   "expected": {
-    "overallScore": { "min": 4, "max": 6 },
-    "categories": {
-      "objectionHandling": { "min": 7, "max": 9 },
-      "discovery": { "min": 1, "max": 4 }
+    "method": {
+      "overallScore": { "min": 12, "max": 22 },
+      "behaviorLabels": { "ppp_plan": 3, "closer_explain_concerns": 0, "objection_isolation": 0, "aaa_acknowledge": 3, "aaa_associate": 0, "aaa_ask": 0 }
     },
+    "overallScore": { "min": 1, "max": 3 },
     "assignedDrillSkill": "discovery_question_quality",
     "forbiddenLeakage": [
       "hiddenContext",

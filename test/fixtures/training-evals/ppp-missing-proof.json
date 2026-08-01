@@ -1,0 +1,16 @@
+{
+  "id": "ppp-missing-proof",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep sets a promise and plan but provides no relevant proof.",
+  "turns": [
+    { "role": "persona", "text": "Who is this?" },
+    { "role": "user", "text": "By the end of this call we can decide whether a solar review is useful. First I will ask two questions, then we can decide if it is a fit or not. Sound fair?" }
+  ],
+  "expected": {
+    "method": {
+      "overallScore": { "min": 53, "max": 63 },
+      "behaviorLabels": { "ppp_proof": 0, "ppp_promise": 3, "ppp_plan": 4 },
+      "assignedDrillBehaviorId": "ppp_proof"
+    }
+  }
+}

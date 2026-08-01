@@ -14,7 +14,7 @@
     { "id": "qualify", "order": 40, "label": "Verify BANT", "behaviorIds": ["bant_budget", "bant_authority", "bant_need", "bant_timing"] },
     { "id": "present", "order": 50, "label": "Sell the destination and bridge", "behaviorIds": ["closer_sell_vacation", "pitch_three_pillars", "pitch_past_attempt_link", "pitch_outcome_focus", "pitch_analogy"] },
     { "id": "ask", "order": 60, "label": "Ask cleanly", "behaviorIds": ["clean_ask"] },
-    { "id": "resolve", "order": 70, "label": "Explain concerns", "behaviorIds": ["closer_explain_concerns", "objection_isolation", "detail_question_intent", "aaa_acknowledge", "aaa_associate", "aaa_ask"] },
+    { "id": "resolve", "order": 70, "label": "Explain concerns", "behaviorIds": ["closer_explain_concerns", "objection_isolation", "detail_question_intent", "aaa_acknowledge", "aaa_associate", "aaa_ask", "hard_no_clean_exit"] },
     { "id": "reinforce", "order": 80, "label": "Reinforce the decision", "behaviorIds": ["closer_reinforce", "reinforce_warm_handoff"] },
     { "id": "enterprise", "order": 90, "label": "Map enterprise process", "behaviorIds": ["enterprise_stakeholder_map"] }
   ],
@@ -162,6 +162,12 @@
       "description": "End the loop with a diagnostic or commitment question.",
       "positiveEvidence": ["clear next question advances diagnosis or decision"],
       "counterEvidence": ["monologue with no return to the prospect"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "hard_no_clean_exit", "stageId": "resolve", "label": "Clean hard-no exit", "critical": true,
+      "description": "After an explicit terminal no, acknowledge it, stop persuasion, and end or honour the contact request.",
+      "positiveEvidence": ["acknowledges the no and exits without another sales question"],
+      "counterEvidence": ["continues persuasion after a terminal no"], "sourceRefs": ["sales_behavior"]
     },
     {
       "id": "closer_reinforce", "stageId": "reinforce", "label": "Reinforce", "critical": false,

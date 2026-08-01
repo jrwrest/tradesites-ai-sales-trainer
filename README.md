@@ -27,6 +27,7 @@ The public demo requires login. For self-hosted public deployments, disable open
 - Commercial solar objection pack for larger business sales.
 - Right-side Help panel that asks the rep to choose a move before revealing suggestions.
 - Post-call scoring, missed opportunities, next drill assignment, and spaced repetition.
+- Versioned, source-grounded PPP, BANT, CLOSER, three-pillar, and AAA evaluation with turn-level evidence and ethical gates.
 - Objection gauntlet mode for repeated high-pressure practice.
 - Local review queue and approved response examples.
 - Pluggable customer brain: deterministic mock, OpenClaw gateway, or local command provider.
@@ -186,6 +187,7 @@ npm run validate:auth
 
 - `npm test` covers server routes, auth, scoring, scheduling, gauntlets, review queues, and flow guards.
 - `npm run eval:fixtures` checks fixed sales-call fixtures against score bands, assigned drills, and leakage strings.
+- Method calibration reports exact behavior agreement and quadratic weighted kappa; see [docs/method-evaluation.md](docs/method-evaluation.md).
 - `npm run smoke` launches Chromium against a temporary local server with mock provider and temp data.
 - `npm run validate:auth` checks a live PocketBase-backed login path.
 
