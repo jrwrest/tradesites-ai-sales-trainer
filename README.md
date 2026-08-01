@@ -15,7 +15,7 @@ Live demo: <https://trainer.tradesites.ai/>
 
 ## Status
 
-This is an early alpha. It is usable for local practice and small controlled demos, but it is not a production dialer, CRM, or call-recording system.
+This is a controlled-beta candidate for authenticated practice. It is not a production dialer, CRM, or call-recording system.
 
 The public demo requires login. For self-hosted public deployments, disable open signup unless you are ready to support unknown users.
 
@@ -111,6 +111,11 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `HOST` | `127.0.0.1` | Express bind host. Remote binding requires `ALLOW_REMOTE_UNSAFE=1`. |
 | `PORT` | `3137` | Express port. |
 | `DATA_DIR` | `data` | Local sessions, skill memory, profiles, and review queue. |
+| `STORAGE_MODE` | empty | Production must explicitly set `single-instance-json`; run one app process only. |
+| `BACKUP_ROOT` | empty | Absolute production backup path outside `DATA_DIR`. |
+| `DATA_RETENTION_ENABLED` | empty | Production must set `1`; purges expired data at startup and on an interval. |
+| `SESSION_RETENTION_DAYS` | `90` | Maximum saved training-session age. |
+| `SIGNUP_REQUEST_RETENTION_DAYS` | `30` | Maximum signup-request record age. |
 | `AUTH_REQUIRED` | `1` | Set `0` only for a private local demo. |
 | `SIGNUP_MODE` | `disabled` | `disabled`, `approval`, or `open`. Approval mode requires admin approval before account creation. |
 | `SIGNUP_ENABLED` | `0` | Set `1` only for local signup testing or intentional public registration. |
@@ -134,7 +139,9 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS` | `300` | Cooldown before a pending signup can resend/rotate a verification link. |
 | `OPENCLAW_GATEWAY_URL` | empty | Optional WebSocket gateway for OpenClaw-backed customer replies. |
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
-| `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. |
+| `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. Production requires a dedicated non-`main` agent. |
+| `OPENCLAW_DATA_POLICY_ACK` | empty | Production OpenClaw deployments must set `1` to acknowledge the synthetic-data-only boundary. |
+| `OPENCLAW_GATEWAY_HEALTH_TIMEOUT_MS` | `3000` | Timeout for the readiness handshake. |
 | `CODEX_BRAIN_COMMAND` | empty | Optional local command that receives JSON and returns a customer reply. |
 | `DIALOGUE_MANAGER_ENABLED` | empty | Enables dialogue-state guardrails. |
 | `DIALOGUE_LLM_RENDER_ENABLED` | empty | Sends dialogue-manager and flow-guard replies through the configured provider before fallback. Keep off until tested. |
@@ -154,8 +161,12 @@ OpenClaw mode sends scenario and transcript context to an OpenClaw gateway:
 ```bash
 OPENCLAW_GATEWAY_URL="ws://127.0.0.1:18789" \
 OPENCLAW_GATEWAY_TOKEN="your-token" \
+OPENCLAW_AGENT_ID="sales-trainer" \
+OPENCLAW_DATA_POLICY_ACK=1 \
 npm start
 ```
+
+The integration requests `operator.write`, not administrative scope. OpenClaw is a trusted-operator boundary rather than tenant isolation, so production should use a dedicated agent—and a separate gateway/OS account when other workloads are not equally trusted. Send synthetic roleplay only, not imported calls or real prospect PII.
 
 Command mode lets you wire any local model command:
 
@@ -199,6 +210,9 @@ npm run validate:auth
 - OpenClaw and command providers receive transcript context.
 - Public deployments should require auth, disable open signup, rate-limit access, and use HTTPS.
 - Approval-mode signup requests are stored under `DATA_DIR` and should not be committed.
+- Production retention defaults to 90 days for sessions and 30 days for signup requests.
+- Users can delete their own saved calls, profile, and skill history from Profile; this does not delete the PocketBase login account.
+- Backups are checksummed and restore only into an empty target. See [docs/deployment.md](docs/deployment.md) for the backup and rollback drill.
 - Health and browser error responses avoid returning internal service URLs.
 
 ## Building New Trade Packs

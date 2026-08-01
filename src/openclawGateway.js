@@ -102,7 +102,7 @@ class OpenClawGatewayClient {
           commands: [],
           auth: { token: this.token },
           role: "operator",
-          scopes: ["operator.admin"],
+          scopes: ["operator.write"],
         })
           .then(() => {
             this.connected = true;
@@ -278,6 +278,23 @@ async function runOpenClawBrain(payload, options = {}) {
   }
 }
 
+async function checkOpenClawGateway(options = {}) {
+  const url = options.url || process.env.OPENCLAW_GATEWAY_URL;
+  const token = options.token || process.env.OPENCLAW_GATEWAY_TOKEN;
+  if (!url) throw new Error("OPENCLAW_GATEWAY_URL is not set");
+  if (!token) throw new Error("OPENCLAW_GATEWAY_TOKEN is not set");
+  validateGatewayUrl(url);
+  const timeoutMs = Number(options.timeoutMs || process.env.OPENCLAW_GATEWAY_HEALTH_TIMEOUT_MS || 3000);
+  const agentId = options.agentId || process.env.OPENCLAW_AGENT_ID || "main";
+  const client = new OpenClawGatewayClient({ url, token, timeoutMs, agentId });
+  try {
+    await client.connect();
+    return true;
+  } finally {
+    client.close();
+  }
+}
+
 function validateGatewayUrl(url) {
   const parsed = new URL(url);
   const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -289,6 +306,7 @@ function validateGatewayUrl(url) {
 module.exports = {
   OpenClawGatewayClient,
   buildOpenClawPrompt,
+  checkOpenClawGateway,
   parseCustomerReply,
   runOpenClawBrain,
   validateGatewayUrl,

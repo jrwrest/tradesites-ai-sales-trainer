@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { getDataDir } = require("./store");
+const { withKeyLock } = require("./keyLock");
 
 const PROFILE_FIELDS = [
   "repName",
@@ -72,20 +73,38 @@ async function loadProfile(user = {}) {
 }
 
 async function saveProfile(user = {}, input = {}) {
-  await fs.mkdir(profilesDir(), { recursive: true });
-  const profile = {
-    ...normalizeProfile(input, user),
-    updatedAt: new Date().toISOString(),
-  };
-  const target = profilePath(user.id || "local");
-  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(profile, null, 2)}\n`);
-  await fs.rename(temp, target);
-  return profile;
+  const repId = user.id || "local";
+  return withKeyLock(`profile:${repId}`, async () => {
+    await fs.mkdir(profilesDir(), { recursive: true, mode: 0o700 });
+    await fs.chmod(profilesDir(), 0o700);
+    const profile = {
+      ...normalizeProfile(input, user),
+      updatedAt: new Date().toISOString(),
+    };
+    const target = profilePath(repId);
+    const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(temp, `${JSON.stringify(profile, null, 2)}\n`, { mode: 0o600 });
+    await fs.rename(temp, target);
+    await fs.chmod(target, 0o600);
+    return profile;
+  });
+}
+
+async function deleteProfile(repId = "local") {
+  return withKeyLock(`profile:${repId}`, async () => {
+    try {
+      await fs.unlink(profilePath(repId));
+      return { deleted: 1 };
+    } catch (error) {
+      if (error.code === "ENOENT") return { deleted: 0 };
+      throw error;
+    }
+  });
 }
 
 module.exports = {
   defaultProfile,
+  deleteProfile,
   loadProfile,
   normalizeProfile,
   profilePath,

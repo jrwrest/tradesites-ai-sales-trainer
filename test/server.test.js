@@ -3,7 +3,12 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { test, before, after } = require("node:test");
-const { createApp, validateApprovalModeConfig, validateServerConfig } = require("../src/server");
+const {
+  createApp,
+  validateApprovalModeConfig,
+  validateProductionConfig,
+  validateServerConfig,
+} = require("../src/server");
 const { updateSkillMemory } = require("../src/skillMemory");
 
 let server;
@@ -317,6 +322,62 @@ test("approval mode requires public link, approval token, and email delivery con
   assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
 });
 
+test("production config requires auth, retention, explicit single-instance storage, backups, and HTTPS", () => {
+  const base = {
+    NODE_ENV: "production",
+    AUTH_REQUIRED: "1",
+    DATA_RETENTION_ENABLED: "1",
+    STORAGE_MODE: "single-instance-json",
+    DATA_DIR: "/var/lib/trainer/data",
+    BACKUP_ROOT: "/var/backups/trainer",
+    PUBLIC_BASE_URL: "https://trainer.example.test",
+    SIGNUP_MODE: "approval",
+  };
+  assert.doesNotThrow(() => validateProductionConfig({ env: base }));
+  for (const [name, value] of [
+    ["AUTH_REQUIRED", "0"],
+    ["DATA_RETENTION_ENABLED", "0"],
+    ["STORAGE_MODE", ""],
+    ["DATA_DIR", "data"],
+    ["BACKUP_ROOT", "backups"],
+    ["PUBLIC_BASE_URL", "http://trainer.example.test"],
+    ["SESSION_RETENTION_DAYS", "0"],
+    ["AUTH_RATE_LIMIT_ATTEMPTS", "NaN"],
+  ]) {
+    assert.throws(
+      () => validateProductionConfig({ env: { ...base, [name]: value } }),
+      /Production config invalid/,
+      name,
+    );
+  }
+  assert.throws(
+    () => validateProductionConfig({ env: { ...base, BACKUP_ROOT: "/var/lib/trainer" } }),
+    /BACKUP_ROOT must not overlap DATA_DIR/,
+  );
+  assert.throws(
+    () => validateProductionConfig({ env: { ...base, SIGNUP_MODE: "open" } }),
+    /Production config invalid/,
+  );
+  assert.doesNotThrow(() => validateProductionConfig({ env: { ...base, SIGNUP_MODE: "open", ALLOW_PUBLIC_SIGNUP: "1" } }));
+
+  const openClawBase = {
+    ...base,
+    OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
+    OPENCLAW_GATEWAY_TOKEN: "secret",
+    OPENCLAW_AGENT_ID: "sales-trainer",
+    OPENCLAW_DATA_POLICY_ACK: "1",
+  };
+  assert.doesNotThrow(() => validateProductionConfig({ env: openClawBase }));
+  assert.throws(
+    () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_AGENT_ID: "main" } }),
+    /dedicated non-main OPENCLAW_AGENT_ID/,
+  );
+  assert.throws(
+    () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_DATA_POLICY_ACK: "0" } }),
+    /OPENCLAW_DATA_POLICY_ACK must be 1/,
+  );
+});
+
 test("typed call happy path persists turns and scores", async () => {
   const created = await request("/api/sessions", {
     method: "POST",
@@ -468,6 +529,28 @@ test("empty message is rejected", async () => {
   assert.equal(reply.body.error, "Message text is required");
   assert.equal(reply.body.code, "message_required");
   assert.equal(typeof reply.body.requestId, "string");
+});
+
+test("oversized transcript and coach-note inputs are rejected before persistence", async () => {
+  const created = await request("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ scenarioId: "roofing-owner" }),
+  });
+  const sessionId = created.body.session.id;
+
+  const message = await request(`/api/sessions/${sessionId}/message`, {
+    method: "POST",
+    body: JSON.stringify({ text: "x".repeat(5001) }),
+  });
+  assert.equal(message.response.status, 413);
+  assert.equal(message.body.code, "message_too_long");
+
+  const note = await request(`/api/sessions/${sessionId}/coach-notes`, {
+    method: "POST",
+    body: JSON.stringify({ note: "x".repeat(4001) }),
+  });
+  assert.equal(note.response.status, 413);
+  assert.equal(note.body.code, "note_too_long");
 });
 
 test("stateless scoring handles empty transcript", async () => {

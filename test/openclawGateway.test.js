@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { WebSocketServer } = require("ws");
-const { runOpenClawBrain, validateGatewayUrl } = require("../src/openclawGateway");
+const { checkOpenClawGateway, runOpenClawBrain, validateGatewayUrl } = require("../src/openclawGateway");
 const { getScenario } = require("../src/scenarios");
 
 function send(socket, payload) {
@@ -86,6 +86,7 @@ test("OpenClaw gateway brain runs through websocket RPC", async () => {
     assert.match(reply.text, /requirement for solar/);
     assert.equal(gateway.requests[0].method, "connect");
     assert.equal(gateway.requests[0].params.auth.token, "test-token");
+    assert.deepEqual(gateway.requests[0].params.scopes, ["operator.write"]);
     assert.equal(gateway.requests[1].method, "agent");
     assert.equal(gateway.requests[1].params.timeout, 2);
     assert.equal(
@@ -130,6 +131,22 @@ test("OpenClaw gateway brain accepts a per-call timeout override", async () => {
     delete process.env.OPENCLAW_GATEWAY_URL;
     delete process.env.OPENCLAW_GATEWAY_TOKEN;
     delete process.env.OPENCLAW_GATEWAY_TIMEOUT_MS;
+    await gateway.close();
+  }
+});
+
+test("OpenClaw readiness verifies the scoped gateway handshake", async () => {
+  const gateway = await startFakeGateway();
+  try {
+    assert.equal(await checkOpenClawGateway({
+      url: gateway.url,
+      token: "test-token",
+      agentId: "sales-trainer",
+      timeoutMs: 2000,
+    }), true);
+    assert.equal(gateway.requests[0].method, "connect");
+    assert.deepEqual(gateway.requests[0].params.scopes, ["operator.write"]);
+  } finally {
     await gateway.close();
   }
 });

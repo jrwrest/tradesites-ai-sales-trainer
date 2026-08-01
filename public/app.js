@@ -534,7 +534,41 @@ function renderProfile(profile) {
     }
   });
 
-  elements.coachCard.append(form);
+  const deletion = document.createElement("section");
+  deletion.className = "data-deletion";
+  const deletionTitle = document.createElement("h3");
+  deletionTitle.textContent = "Delete training data";
+  const deletionHelp = document.createElement("p");
+  deletionHelp.textContent = "This permanently removes your saved calls, profile, and skill history. It does not delete your login account.";
+  const confirmation = document.createElement("input");
+  confirmation.placeholder = "Type DELETE MY TRAINING DATA";
+  confirmation.setAttribute("aria-label", "Deletion confirmation");
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "danger";
+  deleteButton.textContent = "Delete My Training Data";
+  deleteButton.disabled = true;
+  confirmation.addEventListener("input", () => {
+    deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
+  });
+  deleteButton.addEventListener("click", async () => {
+    deleteButton.disabled = true;
+    try {
+      await api("/api/account-data", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: confirmation.value }),
+      });
+      clearActiveSession();
+      renderProfile({});
+      setStatus("Your saved training data was deleted.");
+    } catch (error) {
+      setStatus(error.message, true);
+      deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
+    }
+  });
+  deletion.append(deletionTitle, deletionHelp, confirmation, deleteButton);
+
+  elements.coachCard.append(form, deletion);
 }
 
 function updateTimer() {
