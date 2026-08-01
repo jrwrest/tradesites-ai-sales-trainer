@@ -139,7 +139,7 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS` | `300` | Cooldown before a pending signup can resend/rotate a verification link. |
 | `OPENCLAW_GATEWAY_URL` | empty | Optional WebSocket gateway for OpenClaw-backed customer replies. |
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
-| `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. Production requires a dedicated non-`main` agent. |
+| `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. Production requires the dedicated `sales-trainer-customer` agent. |
 | `OPENCLAW_DATA_POLICY_ACK` | empty | Production OpenClaw deployments must set `1` to acknowledge the synthetic-data-only boundary. |
 | `OPENCLAW_GATEWAY_HEALTH_TIMEOUT_MS` | `3000` | Timeout for the readiness handshake. |
 | `CODEX_BRAIN_COMMAND` | empty | Optional local command that receives JSON and returns a customer reply. |
@@ -161,12 +161,12 @@ OpenClaw mode sends scenario and transcript context to an OpenClaw gateway:
 ```bash
 OPENCLAW_GATEWAY_URL="ws://127.0.0.1:18789" \
 OPENCLAW_GATEWAY_TOKEN="your-token" \
-OPENCLAW_AGENT_ID="sales-trainer" \
+OPENCLAW_AGENT_ID="sales-trainer-customer" \
 OPENCLAW_DATA_POLICY_ACK=1 \
 npm start
 ```
 
-The integration requests `operator.write`, not administrative scope. OpenClaw is a trusted-operator boundary rather than tenant isolation, so production should use a dedicated agent—and a separate gateway/OS account when other workloads are not equally trusted. Send synthetic roleplay only, not imported calls or real prospect PII.
+The integration requests `operator.read` (required for streamed agent events) plus `operator.write` (required to start ordinary turns), never administrative scope. Production requires a dedicated minimal-tool customer-simulator agent; do not reuse an operational sales or messaging agent. OpenClaw is a trusted-operator boundary rather than tenant isolation, so use a separate gateway/OS account when other workloads are not equally trusted. Send synthetic roleplay only, not imported calls or real prospect PII.
 
 Command mode lets you wire any local model command:
 

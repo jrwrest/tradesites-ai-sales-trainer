@@ -69,11 +69,11 @@ Optional OpenClaw provider:
 ```bash
 OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
 OPENCLAW_GATEWAY_TOKEN=replace-with-a-secret
-OPENCLAW_AGENT_ID=sales-trainer
+OPENCLAW_AGENT_ID=sales-trainer-customer
 OPENCLAW_DATA_POLICY_ACK=1
 ```
 
-The gateway handshake requests only `operator.write`. Production refuses the shared `main` agent so the trainer uses a dedicated workspace. `OPENCLAW_DATA_POLICY_ACK=1` records the deployment decision that this boundary receives synthetic roleplay only—never imported recordings, real prospect details, or other customer PII. A shared OpenClaw gateway is not a hostile multi-tenant security boundary; use a separate gateway/OS account if other workloads are not equally trusted.
+The gateway handshake requests `operator.read` plus `operator.write`, never `operator.admin`. Read is required for streamed agent events; write starts ordinary turns. Production accepts only the dedicated `sales-trainer-customer` agent. Configure that agent with the `minimal` tool profile, deny `session_status`, and set its skill allowlist to `[]`; verify an agent canary reports an empty effective tool list. Never point public trainee input at an operational sales, messaging, or coding agent. `OPENCLAW_DATA_POLICY_ACK=1` records the deployment decision that this boundary receives synthetic roleplay only—never imported recordings, real prospect details, or other customer PII. A shared OpenClaw gateway is not a hostile multi-tenant security boundary; use a separate gateway/OS account if other workloads are not equally trusted.
 
 Optional dialogue rendering canary:
 
@@ -171,7 +171,7 @@ After verifying the restored files, rollback by stopping the app, moving the cur
 - [ ] Reverse proxy terminates HTTPS.
 - [ ] Auth and app logs do not include passwords or bearer tokens.
 - [ ] Model providers have spending limits or quotas.
-- [ ] OpenClaw uses `operator.write`, a dedicated non-`main` agent, and synthetic practice data only.
+- [ ] OpenClaw uses read/write (no admin), the minimal-tool `sales-trainer-customer` agent, and synthetic practice data only.
 - [ ] Backups exclude transient smoke-test data.
 
 ## Updating A Server

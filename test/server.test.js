@@ -364,13 +364,13 @@ test("production config requires auth, retention, explicit single-instance stora
     ...base,
     OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
     OPENCLAW_GATEWAY_TOKEN: "secret",
-    OPENCLAW_AGENT_ID: "sales-trainer",
+    OPENCLAW_AGENT_ID: "sales-trainer-customer",
     OPENCLAW_DATA_POLICY_ACK: "1",
   };
   assert.doesNotThrow(() => validateProductionConfig({ env: openClawBase }));
   assert.throws(
     () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_AGENT_ID: "main" } }),
-    /dedicated non-main OPENCLAW_AGENT_ID/,
+    /OPENCLAW_AGENT_ID must be sales-trainer-customer/,
   );
   assert.throws(
     () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_DATA_POLICY_ACK: "0" } }),

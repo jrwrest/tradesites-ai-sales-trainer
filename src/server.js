@@ -131,8 +131,8 @@ function validateProductionConfig({ env = process.env } = {}) {
   }
   if (env.OPENCLAW_GATEWAY_URL) {
     if (!env.OPENCLAW_GATEWAY_TOKEN) errors.push("OPENCLAW_GATEWAY_TOKEN is required");
-    if (!env.OPENCLAW_AGENT_ID || env.OPENCLAW_AGENT_ID === "main") {
-      errors.push("OpenClaw requires a dedicated non-main OPENCLAW_AGENT_ID");
+    if (env.OPENCLAW_AGENT_ID !== "sales-trainer-customer") {
+      errors.push("OPENCLAW_AGENT_ID must be sales-trainer-customer");
     }
     if (env.OPENCLAW_DATA_POLICY_ACK !== "1") {
       errors.push("OPENCLAW_DATA_POLICY_ACK must be 1");
