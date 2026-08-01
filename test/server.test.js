@@ -100,10 +100,26 @@ test("serves scenarios and health", async () => {
   assert.equal(typeof health.body.dialogueRendering.stats.attempts, "number");
   assert.equal(typeof health.body.runtime.uptimeSeconds, "number");
   assert.equal(typeof health.body.runtime.requests.total, "number");
+  assert.deepEqual(health.body.methodPack, {
+    id: "hormozi-sales-2026",
+    version: "1.0.0-beta.1",
+    status: "source-grounded-beta",
+  });
 
   const scenarios = await request("/api/scenarios");
   assert.equal(scenarios.response.status, 200);
   assert.ok(scenarios.body.scenarios.length >= 1);
+});
+
+test("serves the auditable method pack without local source paths", async () => {
+  const result = await request("/api/method-pack");
+
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.manifest.id, "hormozi-sales-2026");
+  assert.ok(result.body.framework.frameworks.some((item) => item.id === "closer"));
+  assert.ok(result.body.rubric.criticalGates.some((item) => item.id === "respect_hard_no"));
+  assert.ok(result.body.drills.drills.length >= 10);
+  assert.doesNotMatch(JSON.stringify(result.body), /\/Users\//);
 });
 
 test("responses include production security headers and suppress framework disclosure", async () => {
@@ -309,6 +325,10 @@ test("typed call happy path persists turns and scores", async () => {
   assert.equal(created.response.status, 201);
   const sessionId = created.body.session.id;
   assert.equal(created.body.session.repId, "local");
+  assert.deepEqual(created.body.session.methodPack, {
+    id: "hormozi-sales-2026",
+    version: "1.0.0-beta.1",
+  });
   assert.equal(created.body.session.turns.length, 1);
   assert.equal(created.body.session.turns[0].role, "persona");
 

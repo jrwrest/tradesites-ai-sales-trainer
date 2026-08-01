@@ -40,6 +40,7 @@ const {
 } = require("./auth");
 const { sendEmail } = require("./email");
 const { installGracefulShutdown } = require("./shutdown");
+const { loadMethodPack } = require("./methodPack");
 
 function getBrainProvider() {
   if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
@@ -180,6 +181,7 @@ function createApp(options = {}) {
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
   const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
   const customerReplyRenderProvider = options.customerReplyRenderProvider;
+  const methodPack = options.methodPack || loadMethodPack();
   const logger = options.logger || defaultLogger();
   const startedAt = Date.now();
   const runtimeRequests = { total: 0, byStatus: {} };
@@ -258,7 +260,17 @@ function createApp(options = {}) {
           byStatus: { ...runtimeRequests.byStatus },
         },
       },
+      methodPack: {
+        id: methodPack.manifest.id,
+        version: methodPack.manifest.version,
+        status: methodPack.manifest.status,
+      },
     });
+  });
+
+  app.get("/api/method-pack", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
+    res.json(methodPack);
   });
 
   app.get("/api/ready", async (_req, res) => {
@@ -639,6 +651,10 @@ function createApp(options = {}) {
         id: crypto.randomUUID(),
         repId: req.user.id,
         scenarioId: scenario.id,
+        methodPack: {
+          id: methodPack.manifest.id,
+          version: methodPack.manifest.version,
+        },
         status: "active",
         startedAt: now,
         endedAt: null,
@@ -679,6 +695,10 @@ function createApp(options = {}) {
         id: crypto.randomUUID(),
         repId: req.user.id,
         scenarioId: scenario.id,
+        methodPack: {
+          id: methodPack.manifest.id,
+          version: methodPack.manifest.version,
+        },
         status: "active",
         startedAt: now,
         endedAt: null,

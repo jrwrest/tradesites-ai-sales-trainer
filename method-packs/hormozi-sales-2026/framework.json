@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "frameworks": [
+    { "id": "proof_promise_plan", "label": "Proof, Promise, Plan", "behaviorIds": ["ppp_proof", "ppp_promise", "ppp_plan"] },
+    { "id": "bant", "label": "Budget, Authority, Need, Timing", "behaviorIds": ["bant_budget", "bant_authority", "bant_need", "bant_timing"] },
+    { "id": "closer", "label": "CLOSER", "behaviorIds": ["closer_clarify", "closer_label", "closer_overview_pain", "closer_sell_vacation", "closer_explain_concerns", "closer_reinforce"] },
+    { "id": "three_pillar_pitch", "label": "Three-pillar bridge", "behaviorIds": ["pitch_three_pillars", "pitch_past_attempt_link", "pitch_outcome_focus", "pitch_analogy"] },
+    { "id": "aaa", "label": "Acknowledge, Associate, Ask", "behaviorIds": ["aaa_acknowledge", "aaa_associate", "aaa_ask"] }
+  ],
+  "stages": [
+    { "id": "prepare", "order": 10, "label": "Prepare and preserve context", "behaviorIds": ["preparation_continuity"] },
+    { "id": "open", "order": 20, "label": "Proof, promise, and plan", "behaviorIds": ["ppp_proof", "ppp_promise", "ppp_plan"] },
+    { "id": "diagnose", "order": 30, "label": "Clarify, label, and overview pain", "behaviorIds": ["closer_clarify", "closer_label", "closer_overview_pain", "prospect_talk_share"] },
+    { "id": "qualify", "order": 40, "label": "Verify BANT", "behaviorIds": ["bant_budget", "bant_authority", "bant_need", "bant_timing"] },
+    { "id": "present", "order": 50, "label": "Sell the destination and bridge", "behaviorIds": ["closer_sell_vacation", "pitch_three_pillars", "pitch_past_attempt_link", "pitch_outcome_focus", "pitch_analogy"] },
+    { "id": "ask", "order": 60, "label": "Ask cleanly", "behaviorIds": ["clean_ask"] },
+    { "id": "resolve", "order": 70, "label": "Explain concerns", "behaviorIds": ["closer_explain_concerns", "objection_isolation", "detail_question_intent", "aaa_acknowledge", "aaa_associate", "aaa_ask"] },
+    { "id": "reinforce", "order": 80, "label": "Reinforce the decision", "behaviorIds": ["closer_reinforce", "reinforce_warm_handoff"] },
+    { "id": "enterprise", "order": 90, "label": "Map enterprise process", "behaviorIds": ["enterprise_stakeholder_map"] }
+  ],
+  "behaviors": [
+    {
+      "id": "preparation_continuity", "stageId": "prepare", "label": "Use known context", "critical": false,
+      "description": "Reflect information already supplied and avoid making the prospect repeat it.",
+      "positiveEvidence": ["references a prior action, note, company fact, or stated goal"],
+      "counterEvidence": ["asks the prospect to repeat context already available"], "sourceRefs": ["before_sale"]
+    },
+    {
+      "id": "ppp_proof", "stageId": "open", "label": "Relevant proof", "critical": false,
+      "description": "Establish concise, truthful evidence relevant to this prospect.",
+      "positiveEvidence": ["specific relevant experience or verified result"],
+      "counterEvidence": ["generic boasting", "unsupported outcome claim"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "ppp_promise", "stageId": "open", "label": "Conversation promise", "critical": false,
+      "description": "Name what useful outcome the conversation will clarify.",
+      "positiveEvidence": ["states the decision or clarity the prospect will gain"],
+      "counterEvidence": ["vague meeting purpose", "guaranteed business outcome"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "ppp_plan", "stageId": "open", "label": "Mutual plan", "critical": false,
+      "description": "Set a short agenda and define a fit or no-fit decision.",
+      "positiveEvidence": ["agenda", "permission", "fit or no-fit outcome"],
+      "counterEvidence": ["launches into pitch without an agenda"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "closer_clarify", "stageId": "diagnose", "label": "Clarify why now", "critical": false,
+      "description": "Establish what prompted the conversation, the desired change, and why it matters now.",
+      "positiveEvidence": ["open question about trigger, desired outcome, or urgency"],
+      "counterEvidence": ["assumes the problem", "begins solution before motive is known"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "closer_label", "stageId": "diagnose", "label": "Label the gap", "critical": false,
+      "description": "Summarize present state, desired state, and believed obstacle, then verify accuracy.",
+      "positiveEvidence": ["concise diagnostic summary followed by confirmation"],
+      "counterEvidence": ["unverified diagnosis", "long product recap"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "closer_overview_pain", "stageId": "diagnose", "label": "Overview past pain", "critical": false,
+      "description": "Explore prior attempts, why they failed, and the real cost of unchanged behavior.",
+      "positiveEvidence": ["past attempt", "missing component", "quantified continuing cost"],
+      "counterEvidence": ["manufactures pain", "uses fear without prospect evidence"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "prospect_talk_share", "stageId": "diagnose", "label": "Let the prospect think", "critical": false,
+      "description": "Use questions and silence so the prospect does most of the diagnostic talking.",
+      "positiveEvidence": ["open questions", "follow-up questions", "space after answers"],
+      "counterEvidence": ["rep monologue", "interrupts or answers own questions"], "sourceRefs": ["sales_behavior"]
+    },
+    {
+      "id": "bant_budget", "stageId": "qualify", "label": "Budget", "critical": false,
+      "description": "Verify access to resources or a credible commercial path before commitment.",
+      "positiveEvidence": ["resource, commercial, or investment constraint explored"],
+      "counterEvidence": ["assumes affordability from enthusiasm"], "sourceRefs": ["before_sale", "closing"]
+    },
+    {
+      "id": "bant_authority", "stageId": "qualify", "label": "Authority", "critical": true,
+      "description": "Map who decides, who influences, and the actual approval process.",
+      "positiveEvidence": ["decision roles and approval path verified"],
+      "counterEvidence": ["pressures an individual to bypass a stakeholder"], "sourceRefs": ["before_sale", "closing"]
+    },
+    {
+      "id": "bant_need", "stageId": "qualify", "label": "Need", "critical": true,
+      "description": "Verify a real problem and a credible fit between need and offer.",
+      "positiveEvidence": ["prospect-defined problem and fit criteria"],
+      "counterEvidence": ["sells despite no benefit or material fit gap"], "sourceRefs": ["before_sale", "sales_behavior"]
+    },
+    {
+      "id": "bant_timing", "stageId": "qualify", "label": "Timing", "critical": false,
+      "description": "Verify when action is possible and what determines that timing.",
+      "positiveEvidence": ["timing trigger, deadline, or implementation capacity"],
+      "counterEvidence": ["invented urgency", "ignores a legitimate delay"], "sourceRefs": ["before_sale", "closing"]
+    },
+    {
+      "id": "closer_sell_vacation", "stageId": "present", "label": "Sell the vacation", "critical": false,
+      "description": "Present the desired destination and credible bridge, not a tour of operational trivia.",
+      "positiveEvidence": ["prospect outcome connected to a believable mechanism"],
+      "counterEvidence": ["feature dump", "outcome detached from diagnosis"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "pitch_three_pillars", "stageId": "present", "label": "Three memorable pillars", "critical": false,
+      "description": "Compress the solution into three memorable requirements.",
+      "positiveEvidence": ["three distinct requirements named and explained"],
+      "counterEvidence": ["unstructured list of features"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "pitch_past_attempt_link", "stageId": "present", "label": "Link past attempts", "critical": false,
+      "description": "Show which necessary pillar a prior attempt lacked without belittling the prospect.",
+      "positiveEvidence": ["credits prior attempt and identifies missing requirement"],
+      "counterEvidence": ["dismisses prior effort", "claims causality without evidence"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "pitch_outcome_focus", "stageId": "present", "label": "Outcome-first explanation", "critical": false,
+      "description": "Keep the explanation brief and tied to the desired result.",
+      "positiveEvidence": ["short bridge from diagnosis to desired outcome"],
+      "counterEvidence": ["extended implementation lecture before agreement"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "pitch_analogy", "stageId": "present", "label": "Clarifying analogy", "critical": false,
+      "description": "Use a truthful familiar analogy only when it clarifies the mechanism.",
+      "positiveEvidence": ["analogy maps mechanism accurately"],
+      "counterEvidence": ["analogy substitutes for evidence or overpromises"], "sourceRefs": ["sales_conversation"]
+    },
+    {
+      "id": "clean_ask", "stageId": "ask", "label": "Clean ask", "critical": false,
+      "description": "Once fit and bridge are confirmed, ask directly for the appropriate next action and stop presenting after yes.",
+      "positiveEvidence": ["specific commitment question", "silence after ask"],
+      "counterEvidence": ["vague next step", "keeps pitching after agreement"], "sourceRefs": ["sales_conversation", "closing"]
+    },
+    {
+      "id": "closer_explain_concerns", "stageId": "resolve", "label": "Explain concerns", "critical": false,
+      "description": "Understand and resolve the underlying concern rather than firing a memorized rebuttal.",
+      "positiveEvidence": ["concern clarified before response", "logic tied to prospect facts"],
+      "counterEvidence": ["instant rebuttal", "argues with the surface wording"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "objection_isolation", "stageId": "resolve", "label": "Isolate the obstacle", "critical": false,
+      "description": "Turn a vague stall into the specific feared outcome or decision variable.",
+      "positiveEvidence": ["asks what specifically makes this a no or what must be true"],
+      "counterEvidence": ["assumes the first objection is the real issue"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "detail_question_intent", "stageId": "resolve", "label": "Diagnose detail intent", "critical": false,
+      "description": "Before answering a detailed question, learn why the answer matters and what outcome is required.",
+      "positiveEvidence": ["asks what requirement sits behind the detail"],
+      "counterEvidence": ["answers blindly", "invents certainty"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "aaa_acknowledge", "stageId": "resolve", "label": "Acknowledge", "critical": false,
+      "description": "Reflect the concern accurately without automatically agreeing with a false conclusion.",
+      "positiveEvidence": ["specific reflection of concern"],
+      "counterEvidence": ["dismisses concern", "fake agreement"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "aaa_associate", "stageId": "resolve", "label": "Associate", "critical": false,
+      "description": "Connect the concern to a reasonable interpretation, comparable customer, or credible expert explanation.",
+      "positiveEvidence": ["relevant and truthful peer, principle, or explanation"],
+      "counterEvidence": ["fabricated customer story", "irrelevant canned social proof"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "aaa_ask", "stageId": "resolve", "label": "Ask", "critical": false,
+      "description": "End the loop with a diagnostic or commitment question.",
+      "positiveEvidence": ["clear next question advances diagnosis or decision"],
+      "counterEvidence": ["monologue with no return to the prospect"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "closer_reinforce", "stageId": "reinforce", "label": "Reinforce", "critical": false,
+      "description": "Protect the decision with a specific next meeting, context transfer, and expectation reset.",
+      "positiveEvidence": ["next meeting booked", "goals, concerns, and promises transferred"],
+      "counterEvidence": ["cold handoff", "new owner lacks context"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "reinforce_warm_handoff", "stageId": "reinforce", "label": "Warm handoff", "critical": false,
+      "description": "Introduce the next owner by name and purpose while the customer is present.",
+      "positiveEvidence": ["live contextual introduction and restated next step"],
+      "counterEvidence": ["generic handoff email with no context"], "sourceRefs": ["closing"]
+    },
+    {
+      "id": "enterprise_stakeholder_map", "stageId": "enterprise", "label": "Enterprise stakeholder map", "critical": true,
+      "description": "For complex sales, map procurement, legal, security, finance, users, and approval stages instead of forcing a transactional close.",
+      "positiveEvidence": ["stakeholders, stages, owners, and next evidence mapped"],
+      "counterEvidence": ["treats one contact as unilateral buyer", "bypasses procurement reality"], "sourceRefs": ["closing"]
+    }
+  ]
+}
