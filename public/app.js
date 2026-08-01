@@ -539,7 +539,7 @@ function renderProfile(profile) {
   const deletionTitle = document.createElement("h3");
   deletionTitle.textContent = "Delete training data";
   const deletionHelp = document.createElement("p");
-  deletionHelp.textContent = "This permanently removes your saved calls, profile, and skill history. It does not delete your login account.";
+  deletionHelp.textContent = "This removes the trainer's saved copy of your calls, profile, and skill history. It does not delete your login account. Do not enter real prospect personal data in synthetic practice.";
   const confirmation = document.createElement("input");
   confirmation.placeholder = "Type DELETE MY TRAINING DATA";
   confirmation.setAttribute("aria-label", "Deletion confirmation");

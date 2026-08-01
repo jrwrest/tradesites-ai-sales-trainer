@@ -14,6 +14,7 @@ These are generic self-hosting notes for Tradesites AI Sales Trainer. Keep live 
 - Store transcripts in a private `DATA_DIR` outside the git checkout.
 - Run exactly one app process while using the JSON data store. Horizontal replicas require replacing it with a transactional database first.
 - Keep `BACKUP_ROOT` on a separate path from `DATA_DIR`; take backups with the app stopped or from a filesystem snapshot.
+- Run the trainer and PocketBase as a dedicated unprivileged service account. Example systemd environment and hardening drop-ins live under `ops/systemd/`.
 
 ## Example Environment
 
@@ -138,6 +139,8 @@ Expected shape:
 Production startup fails unless retention is enabled. The app purges sessions older than 90 days and signup requests older than 30 days by default, at startup and daily. Override the periods with `SESSION_RETENTION_DAYS`, `SIGNUP_REQUEST_RETENTION_DAYS`, and `RETENTION_INTERVAL_MS`.
 
 Authenticated users can delete their own saved calls, profile, and skill history from Profile by typing `DELETE MY TRAINING DATA`. This deliberately leaves the PocketBase login account intact so account deletion remains an administrator-controlled identity operation.
+
+The deletion endpoint removes the trainer's local copy immediately. If an optional model provider is enabled, its session/transcript retention remains governed by that provider boundary. For the shared OpenClaw beta boundary, allow synthetic roleplay only and keep its enforced session maintenance at no more than 30 days; use a separate Gateway if you need an independently erasable provider store.
 
 The backup tool writes a private, checksummed snapshot. Stop the app first, or point `DATA_DIR` at a read-only filesystem snapshot so files from several stores cannot change mid-copy:
 
