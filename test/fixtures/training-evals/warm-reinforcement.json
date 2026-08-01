@@ -1,0 +1,15 @@
+{
+  "id": "warm-reinforcement",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep reinforces an agreed decision with a booked contextual handoff.",
+  "turns": [
+    { "role": "persona", "text": "Yes, let's proceed." },
+    { "role": "user", "text": "Let's book the next meeting for Tuesday. I will introduce you to Sam, who owns onboarding, so she can carry over your payback target and procurement concerns." }
+  ],
+  "expected": {
+    "method": {
+      "overallScore": { "min": 41, "max": 51 },
+      "behaviorLabels": { "clean_ask": 3, "closer_reinforce": 3, "reinforce_warm_handoff": 3 }
+    }
+  }
+}

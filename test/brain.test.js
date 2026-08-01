@@ -24,6 +24,7 @@ afterEach(clearBrainEnv);
 const scenario = getScenario("roofing-owner");
 const enterpriseScenario = getScenario("enterprise-commercial-solar");
 const hardRejectionScenario = getScenario("commercial-solar-rejection");
+const manufacturerScenario = getScenario("manufacturer-power-payback-report");
 
 function session(turns = []) {
   return {
@@ -82,6 +83,27 @@ test("hard rejection scenario asks for context after identity-only reply", async
   assert.equal(reply.flowGuard, "missing_call_context");
   assert.match(reply.text, /from where|what is this about/i);
   assert.doesNotMatch(reply.text, /tried something like that/i);
+});
+
+test("manufacturer opener treats Blue Swans report context as specific call context", async () => {
+  const repMessage =
+    "Hi Stuart, it is James from Blue Swans. We built a manufacturer power payback report for BSB Structural. Did I catch you at a bad time?";
+
+  const reply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: {
+      id: "manufacturer-blue-swans-context",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: manufacturerScenario.persona.openingLine },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.notEqual(reply.flowGuard, "missing_call_context");
+  assert.doesNotMatch(reply.text, /who are you with|what is this about|from where/i);
 });
 
 test("dialogue manager replies render through an injected provider when enabled", async () => {
@@ -173,6 +195,35 @@ test("dialogue render flag off keeps guard replies deterministic", async () => {
   assert.equal(calls, 0);
   assert.equal(reply.provider, "flow_guard");
   assert.equal(reply.dialogue, undefined);
+});
+
+test("dialogue render does not shorten terminal hard-no exits", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  process.env.DIALOGUE_LLM_RENDER_ENABLED = "1";
+
+  let calls = 0;
+  const repMessage = "No problem. I will leave it there. Thanks for your time.";
+  const reply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: {
+      id: "manufacturer-hard-no-render-skip",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: manufacturerScenario.persona.openingLine },
+        { role: "persona", text: "No thanks, we are not interested. Take us off your list." },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+    renderProvider: async () => {
+      calls += 1;
+      return { text: "Okay. Bye.", provider: "fake_llm" };
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.text, "Okay. Thanks. Bye.");
 });
 
 test("dialogue render falls back when provider returns an unrelated objection", async () => {

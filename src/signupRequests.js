@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { getDataDir } = require("./store");
+const { withKeyLock } = require("./keyLock");
 
 const STATUS = {
   PENDING_EMAIL: "pending_email_verification",
@@ -100,11 +101,13 @@ async function loadSignupRequests() {
 }
 
 async function saveSignupRequests(requests) {
-  await fs.mkdir(getDataDir(), { recursive: true });
+  await fs.mkdir(getDataDir(), { recursive: true, mode: 0o700 });
+  await fs.chmod(getDataDir(), 0o700);
   const target = requestsPath();
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify({ schemaVersion: 1, requests }, null, 2)}\n`);
+  await fs.writeFile(temp, `${JSON.stringify({ schemaVersion: 1, requests }, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temp, target);
+  await fs.chmod(target, 0o600);
 }
 
 function assertValidEmail(email) {
@@ -115,7 +118,7 @@ function assertValidEmail(email) {
   }
 }
 
-async function createSignupRequest(input = {}, now = new Date()) {
+async function createSignupRequestUnlocked(input = {}, now = new Date()) {
   const email = normalizeEmail(input.email);
   assertValidEmail(email);
 
@@ -165,7 +168,11 @@ async function createSignupRequest(input = {}, now = new Date()) {
   return { request, created: true, emailVerificationToken };
 }
 
-async function verifySignupEmail(id, token, now = new Date()) {
+async function createSignupRequest(input = {}, now = new Date()) {
+  return withKeyLock("signup-requests", () => createSignupRequestUnlocked(input, now));
+}
+
+async function verifySignupEmailUnlocked(id, token, now = new Date()) {
   const requests = await loadSignupRequests();
   const request = requests.find((item) => item.id === id);
   if (!request) {
@@ -193,9 +200,11 @@ async function verifySignupEmail(id, token, now = new Date()) {
   return { ...request, adminApprovalToken };
 }
 
-async function approveSignupRequest(id, token, now = new Date()) {
-  const requests = await loadSignupRequests();
-  const request = requests.find((item) => item.id === id);
+async function verifySignupEmail(id, token, now = new Date()) {
+  return withKeyLock("signup-requests", () => verifySignupEmailUnlocked(id, token, now));
+}
+
+function assertApprovalRequest(request, token, now = new Date()) {
   if (!request) {
     const error = new Error("Signup request not found");
     error.code = "SIGNUP_REQUEST_NOT_FOUND";
@@ -221,6 +230,17 @@ async function approveSignupRequest(id, token, now = new Date()) {
     error.code = "SIGNUP_APPROVAL_TOKEN_EXPIRED";
     throw error;
   }
+  return request;
+}
+
+async function validateSignupApprovalToken(id, token, now = new Date()) {
+  const requests = await loadSignupRequests();
+  return assertApprovalRequest(requests.find((item) => item.id === id), token, now);
+}
+
+async function approveSignupRequestUnlocked(id, token, now = new Date()) {
+  const requests = await loadSignupRequests();
+  const request = assertApprovalRequest(requests.find((item) => item.id === id), token, now);
 
   const passwordSetupToken = createPlainToken();
   request.status = STATUS.APPROVED;
@@ -231,6 +251,10 @@ async function approveSignupRequest(id, token, now = new Date()) {
   request.passwordSetupTokenHash = hashToken(passwordSetupToken);
   await saveSignupRequests(requests);
   return { request, passwordSetupToken };
+}
+
+async function approveSignupRequest(id, token, now = new Date()) {
+  return withKeyLock("signup-requests", () => approveSignupRequestUnlocked(id, token, now));
 }
 
 async function validatePasswordSetupToken(id, token, now = new Date()) {
@@ -254,7 +278,7 @@ async function validatePasswordSetupToken(id, token, now = new Date()) {
   return request;
 }
 
-async function consumeSignupRequest(id, now = new Date()) {
+async function consumeSignupRequestUnlocked(id, now = new Date()) {
   const requests = await loadSignupRequests();
   const request = requests.find((item) => item.id === id);
   if (!request || request.status !== STATUS.APPROVED) {
@@ -267,6 +291,29 @@ async function consumeSignupRequest(id, now = new Date()) {
   request.passwordSetupTokenHash = null;
   await saveSignupRequests(requests);
   return request;
+}
+
+async function consumeSignupRequest(id, now = new Date()) {
+  return withKeyLock("signup-requests", () => consumeSignupRequestUnlocked(id, now));
+}
+
+async function purgeExpiredSignupRequests({ retentionDays = 30, now = new Date() } = {}) {
+  const days = Number(retentionDays);
+  if (!Number.isFinite(days) || days <= 0) throw new Error("retentionDays must be positive");
+  return withKeyLock("signup-requests", async () => {
+    const cutoff = now.getTime() - days * 24 * 60 * 60 * 1000;
+    const requests = await loadSignupRequests();
+    const retained = requests.filter((request) => {
+      const lifecycleDate = request.usedAt
+        || request.passwordSetupExpiresAt
+        || request.adminApprovalExpiresAt
+        || request.emailVerificationExpiresAt
+        || request.requestedAt;
+      return !lifecycleDate || new Date(lifecycleDate).getTime() >= cutoff;
+    });
+    if (retained.length !== requests.length) await saveSignupRequests(retained);
+    return { deleted: requests.length - retained.length, retained: retained.length };
+  });
 }
 
 function publicBaseUrl() {
@@ -338,7 +385,9 @@ module.exports = {
   createSignupRequest,
   loadSignupRequests,
   notifyVerifiedSignupRequest,
+  purgeExpiredSignupRequests,
   normalizeEmail,
   validatePasswordSetupToken,
+  validateSignupApprovalToken,
   verifySignupEmail,
 };

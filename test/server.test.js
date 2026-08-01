@@ -3,7 +3,12 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { test, before, after } = require("node:test");
-const { createApp, validateApprovalModeConfig, validateServerConfig } = require("../src/server");
+const {
+  createApp,
+  validateApprovalModeConfig,
+  validateProductionConfig,
+  validateServerConfig,
+} = require("../src/server");
 const { updateSkillMemory } = require("../src/skillMemory");
 
 let server;
@@ -98,10 +103,102 @@ test("serves scenarios and health", async () => {
   assert.equal(health.body.dialogueRendering.maxConcurrentPerUser, 2);
   assert.equal(health.body.dialogueRendering.maxConcurrentGlobal, 10);
   assert.equal(typeof health.body.dialogueRendering.stats.attempts, "number");
+  assert.equal(typeof health.body.runtime.uptimeSeconds, "number");
+  assert.equal(typeof health.body.runtime.requests.total, "number");
+  assert.deepEqual(health.body.methodPack, {
+    id: "hormozi-sales-2026",
+    version: "1.0.0-beta.2",
+    status: "source-grounded-beta",
+  });
 
   const scenarios = await request("/api/scenarios");
   assert.equal(scenarios.response.status, 200);
   assert.ok(scenarios.body.scenarios.length >= 1);
+});
+
+test("serves the auditable method pack without local source paths", async () => {
+  const result = await request("/api/method-pack");
+
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.manifest.id, "hormozi-sales-2026");
+  assert.ok(result.body.framework.frameworks.some((item) => item.id === "closer"));
+  assert.ok(result.body.rubric.criticalGates.some((item) => item.id === "respect_hard_no"));
+  assert.ok(result.body.drills.drills.length >= 10);
+  assert.doesNotMatch(JSON.stringify(result.body), /\/Users\//);
+});
+
+test("responses include production security headers and suppress framework disclosure", async () => {
+  const response = await fetch(`${baseUrl}/app`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-powered-by"), null);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(response.headers.get("cross-origin-opener-policy"), "same-origin");
+  assert.match(response.headers.get("strict-transport-security"), /max-age=31536000/);
+  assert.match(response.headers.get("permissions-policy"), /microphone=\(self\)/);
+  assert.match(response.headers.get("content-security-policy"), /default-src 'self'/);
+  assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.match(response.headers.get("x-request-id"), /^[0-9a-f-]{36}$/);
+});
+
+test("readiness fails closed when a required dependency is unavailable", async () => {
+  const app = createApp({
+    authRequired: false,
+    readinessChecks: [
+      { name: "store", required: true, check: async () => true },
+      { name: "auth", required: true, check: async () => { throw new Error("secret upstream detail"); } },
+      { name: "dialogue_provider", required: false, check: async () => false },
+    ],
+  });
+  let localServer;
+  try {
+    await new Promise((resolve) => {
+      localServer = app.listen(0, "127.0.0.1", resolve);
+    });
+    const response = await fetch(`http://127.0.0.1:${localServer.address().port}/api/ready`);
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(body.ok, false);
+    assert.deepEqual(body.checks, [
+      { name: "store", required: true, ok: true },
+      { name: "auth", required: true, ok: false },
+      { name: "dialogue_provider", required: false, ok: false },
+    ]);
+    assert.doesNotMatch(JSON.stringify(body), /secret upstream detail/);
+  } finally {
+    if (localServer) await new Promise((resolve) => localServer.close(resolve));
+  }
+});
+
+test("request telemetry records safe structured metadata", async () => {
+  const entries = [];
+  const app = createApp({
+    authRequired: false,
+    logger: { info: (entry) => entries.push(entry), error: () => {} },
+  });
+  let localServer;
+  try {
+    await new Promise((resolve) => {
+      localServer = app.listen(0, "127.0.0.1", resolve);
+    });
+    const response = await fetch(`http://127.0.0.1:${localServer.address().port}/api/health?token=do-not-log`, {
+      headers: { Authorization: "Bearer do-not-log" },
+    });
+    assert.equal(response.status, 200);
+
+    const entry = entries.find((candidate) => candidate.event === "http_request");
+    assert.equal(entry.method, "GET");
+    assert.equal(entry.path, "/api/health");
+    assert.equal(entry.status, 200);
+    assert.equal(typeof entry.durationMs, "number");
+    assert.match(entry.requestId, /^[0-9a-f-]{36}$/);
+    assert.doesNotMatch(JSON.stringify(entry), /do-not-log/);
+  } finally {
+    if (localServer) await new Promise((resolve) => localServer.close(resolve));
+  }
 });
 
 test("health exposes dialogue render flag and timeout", async () => {
@@ -225,6 +322,62 @@ test("approval mode requires public link, approval token, and email delivery con
   assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
 });
 
+test("production config requires auth, retention, explicit single-instance storage, backups, and HTTPS", () => {
+  const base = {
+    NODE_ENV: "production",
+    AUTH_REQUIRED: "1",
+    DATA_RETENTION_ENABLED: "1",
+    STORAGE_MODE: "single-instance-json",
+    DATA_DIR: "/var/lib/trainer/data",
+    BACKUP_ROOT: "/var/backups/trainer",
+    PUBLIC_BASE_URL: "https://trainer.example.test",
+    SIGNUP_MODE: "approval",
+  };
+  assert.doesNotThrow(() => validateProductionConfig({ env: base }));
+  for (const [name, value] of [
+    ["AUTH_REQUIRED", "0"],
+    ["DATA_RETENTION_ENABLED", "0"],
+    ["STORAGE_MODE", ""],
+    ["DATA_DIR", "data"],
+    ["BACKUP_ROOT", "backups"],
+    ["PUBLIC_BASE_URL", "http://trainer.example.test"],
+    ["SESSION_RETENTION_DAYS", "0"],
+    ["AUTH_RATE_LIMIT_ATTEMPTS", "NaN"],
+  ]) {
+    assert.throws(
+      () => validateProductionConfig({ env: { ...base, [name]: value } }),
+      /Production config invalid/,
+      name,
+    );
+  }
+  assert.throws(
+    () => validateProductionConfig({ env: { ...base, BACKUP_ROOT: "/var/lib/trainer" } }),
+    /BACKUP_ROOT must not overlap DATA_DIR/,
+  );
+  assert.throws(
+    () => validateProductionConfig({ env: { ...base, SIGNUP_MODE: "open" } }),
+    /Production config invalid/,
+  );
+  assert.doesNotThrow(() => validateProductionConfig({ env: { ...base, SIGNUP_MODE: "open", ALLOW_PUBLIC_SIGNUP: "1" } }));
+
+  const openClawBase = {
+    ...base,
+    OPENCLAW_GATEWAY_URL: "ws://127.0.0.1:18789",
+    OPENCLAW_GATEWAY_TOKEN: "secret",
+    OPENCLAW_AGENT_ID: "sales-trainer-customer",
+    OPENCLAW_DATA_POLICY_ACK: "1",
+  };
+  assert.doesNotThrow(() => validateProductionConfig({ env: openClawBase }));
+  assert.throws(
+    () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_AGENT_ID: "main" } }),
+    /OPENCLAW_AGENT_ID must be sales-trainer-customer/,
+  );
+  assert.throws(
+    () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_DATA_POLICY_ACK: "0" } }),
+    /OPENCLAW_DATA_POLICY_ACK must be 1/,
+  );
+});
+
 test("typed call happy path persists turns and scores", async () => {
   const created = await request("/api/sessions", {
     method: "POST",
@@ -233,6 +386,10 @@ test("typed call happy path persists turns and scores", async () => {
   assert.equal(created.response.status, 201);
   const sessionId = created.body.session.id;
   assert.equal(created.body.session.repId, "local");
+  assert.deepEqual(created.body.session.methodPack, {
+    id: "hormozi-sales-2026",
+    version: "1.0.0-beta.2",
+  });
   assert.equal(created.body.session.turns.length, 1);
   assert.equal(created.body.session.turns[0].role, "persona");
 
@@ -372,6 +529,28 @@ test("empty message is rejected", async () => {
   assert.equal(reply.body.error, "Message text is required");
   assert.equal(reply.body.code, "message_required");
   assert.equal(typeof reply.body.requestId, "string");
+});
+
+test("oversized transcript and coach-note inputs are rejected before persistence", async () => {
+  const created = await request("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ scenarioId: "roofing-owner" }),
+  });
+  const sessionId = created.body.session.id;
+
+  const message = await request(`/api/sessions/${sessionId}/message`, {
+    method: "POST",
+    body: JSON.stringify({ text: "x".repeat(5001) }),
+  });
+  assert.equal(message.response.status, 413);
+  assert.equal(message.body.code, "message_too_long");
+
+  const note = await request(`/api/sessions/${sessionId}/coach-notes`, {
+    method: "POST",
+    body: JSON.stringify({ note: "x".repeat(4001) }),
+  });
+  assert.equal(note.response.status, 413);
+  assert.equal(note.body.code, "note_too_long");
 });
 
 test("stateless scoring handles empty transcript", async () => {

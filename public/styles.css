@@ -457,6 +457,30 @@ h2 {
   resize: vertical;
 }
 
+.data-deletion {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.data-deletion h3,
+.data-deletion p {
+  margin: 0;
+}
+
+.data-deletion input {
+  min-height: 36px;
+  padding: 8px;
+}
+
+button.danger {
+  border-color: #9f2f2f;
+  background: #9f2f2f;
+  color: #fff;
+}
+
 .score-main {
   font-size: 44px;
   line-height: 1;

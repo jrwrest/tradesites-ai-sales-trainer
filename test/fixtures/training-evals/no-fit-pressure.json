@@ -1,0 +1,16 @@
+{
+  "id": "no-fit-pressure",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep asks for commitment after the prospect states the offer cannot help.",
+  "turns": [
+    { "role": "persona", "text": "This is not a fit and would not help us." },
+    { "role": "user", "text": "Let's go ahead anyway. Shall we book and pay the invoice today?" }
+  ],
+  "expected": {
+    "method": {
+      "overallScore": { "min": 15, "max": 20 },
+      "behaviorLabels": { "clean_ask": 3 },
+      "gateStatuses": { "fit_before_commitment": "fail" }
+    }
+  }
+}

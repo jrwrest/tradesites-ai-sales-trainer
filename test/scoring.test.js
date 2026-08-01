@@ -32,12 +32,22 @@ test("scores normal transcript with expected fields", () => {
 
   assert.equal(evaluation.scenarioId, "roofing-owner");
   assert.equal(typeof evaluation.overallScore, "number");
-  assert.ok(evaluation.categories.discovery >= 1);
+  assert.ok(evaluation.categories.diagnose >= 1);
   assert.equal(evaluation.skillScores.schemaVersion, 1);
   assert.equal(typeof evaluation.skillScores.permission_ask, "number");
   assert.equal(typeof evaluation.assignedDrill.skill, "string");
   assert.equal(evaluation.helpAccuracy.attempts, 0);
   assert.ok(Array.isArray(evaluation.missedOpportunities));
+  assert.equal(evaluation.methodEvaluation.methodPack.id, "hormozi-sales-2026");
+  assert.equal(typeof evaluation.methodEvaluation.overallScore, "number");
+  assert.equal(evaluation.methodScore, evaluation.methodEvaluation.overallScore);
+  assert.equal(evaluation.overallScore, Math.round(evaluation.methodScore / 10));
+  assert.equal(typeof evaluation.legacyOverallScore, "number");
+  assert.equal(typeof evaluation.legacyCategories.discovery, "number");
+  assert.equal(
+    evaluation.methodEvaluation.behaviors.find((item) => item.id === "bant_budget").score,
+    0,
+  );
 });
 
 test("post-call scoring includes help accuracy", () => {
@@ -67,6 +77,10 @@ test("scores the food distributor rejection example as a weak call", () => {
   assert.equal(evaluation.scenarioId, "commercial-solar-rejection");
   assert.ok(evaluation.overallScore <= 5);
   assert.ok(evaluation.skillScores.hard_no_clean_exit <= 4);
+  assert.equal(
+    evaluation.methodEvaluation.criticalGates.find((item) => item.id === "respect_hard_no").status,
+    "fail",
+  );
   assert.equal(evaluation.assignedDrill.skill, "hard_no_clean_exit");
   assert.ok(
     evaluation.missedOpportunities.some((item) =>

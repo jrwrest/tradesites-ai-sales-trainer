@@ -21,11 +21,12 @@
     }
   ],
   "expected": {
-    "overallScore": { "min": 4, "max": 6 },
-    "categories": {
-      "objectionHandling": { "min": 4, "max": 6 },
-      "close": { "min": 8, "max": 10 }
+    "method": {
+      "overallScore": { "min": 52, "max": 62 },
+      "behaviorLabels": { "ppp_plan": 3, "aaa_acknowledge": 3, "hard_no_clean_exit": 3 },
+      "gateStatuses": { "respect_hard_no": "pass" }
     },
+    "overallScore": { "min": 4, "max": 6 },
     "assignedDrillSkill": "discovery_question_quality",
     "forbiddenLeakage": [
       "hiddenContext",

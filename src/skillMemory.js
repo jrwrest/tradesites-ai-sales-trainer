@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { getDataDir } = require("./store");
+const { withKeyLock } = require("./keyLock");
 
 function safeRepId(repId = "local") {
   return Buffer.from(String(repId || "local"), "utf8").toString("base64url");
@@ -50,45 +51,66 @@ async function loadSkillMemory(repId = "local") {
   }
 }
 
-async function saveSkillMemory(memory) {
-  await fs.mkdir(getDataDir(), { recursive: true });
+async function saveSkillMemoryUnlocked(memory) {
+  await fs.mkdir(getDataDir(), { recursive: true, mode: 0o700 });
+  await fs.chmod(getDataDir(), 0o700);
   const target = skillMemoryPath(memory.repId || "local");
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(memory, null, 2)}\n`);
+  await fs.writeFile(temp, `${JSON.stringify(memory, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temp, target);
+  await fs.chmod(target, 0o600);
+}
+
+async function saveSkillMemory(memory) {
+  const repId = memory.repId || "local";
+  return withKeyLock(`skill-memory:${repId}`, () => saveSkillMemoryUnlocked(memory));
 }
 
 async function updateSkillMemory({ session, evaluation, now = new Date() }) {
   const repId = session.repId || "local";
-  const memory = await loadSkillMemory(repId);
-  const skillScores = evaluation.skillScores || {};
-  for (const [skill, score] of Object.entries(skillScores)) {
-    if (skill === "schemaVersion" || typeof score !== "number") continue;
-    const existing = memory.skills[skill] || {
-      score,
-      confidence: 0.5,
-      attempts: 0,
-      recentSessionIds: [],
-    };
-    const recentSessionIds = Array.isArray(existing.recentSessionIds)
-      ? existing.recentSessionIds
-      : [];
-    const alreadyCounted = recentSessionIds.includes(session.id);
-    const intervalDays = intervalDaysForScore(score);
-    memory.skills[skill] = {
-      score,
-      confidence: Math.min(1, Math.max(0.1, (existing.confidence || 0.5) + (score >= 8 ? 0.05 : -0.03))),
-      attempts: existing.attempts + (alreadyCounted ? 0 : 1),
-      lastPractisedAt: now.toISOString(),
-      nextDueAt: addDays(now, intervalDays).toISOString(),
-      intervalDays,
-      recentSessionIds: alreadyCounted
-        ? recentSessionIds
-        : [...recentSessionIds.slice(-4), session.id],
-    };
-  }
-  await saveSkillMemory(memory);
-  return memory;
+  return withKeyLock(`skill-memory:${repId}`, async () => {
+    const memory = await loadSkillMemory(repId);
+    const skillScores = evaluation.skillScores || {};
+    for (const [skill, score] of Object.entries(skillScores)) {
+      if (skill === "schemaVersion" || typeof score !== "number") continue;
+      const existing = memory.skills[skill] || {
+        score,
+        confidence: 0.5,
+        attempts: 0,
+        recentSessionIds: [],
+      };
+      const recentSessionIds = Array.isArray(existing.recentSessionIds)
+        ? existing.recentSessionIds
+        : [];
+      const alreadyCounted = recentSessionIds.includes(session.id);
+      const intervalDays = intervalDaysForScore(score);
+      memory.skills[skill] = {
+        score,
+        confidence: Math.min(1, Math.max(0.1, (existing.confidence || 0.5) + (score >= 8 ? 0.05 : -0.03))),
+        attempts: existing.attempts + (alreadyCounted ? 0 : 1),
+        lastPractisedAt: now.toISOString(),
+        nextDueAt: addDays(now, intervalDays).toISOString(),
+        intervalDays,
+        recentSessionIds: alreadyCounted
+          ? recentSessionIds
+          : [...recentSessionIds.slice(-4), session.id],
+      };
+    }
+    await saveSkillMemoryUnlocked(memory);
+    return memory;
+  });
+}
+
+async function deleteSkillMemory(repId = "local") {
+  return withKeyLock(`skill-memory:${repId}`, async () => {
+    try {
+      await fs.unlink(skillMemoryPath(repId));
+      return { deleted: 1 };
+    } catch (error) {
+      if (error.code === "ENOENT") return { deleted: 0 };
+      throw error;
+    }
+  });
 }
 
 async function getDueDrills(now = new Date(), repId = "local") {
@@ -111,6 +133,7 @@ async function getDueDrills(now = new Date(), repId = "local") {
 
 module.exports = {
   getDueDrills,
+  deleteSkillMemory,
   intervalDaysForScore,
   loadSkillMemory,
   saveSkillMemory,

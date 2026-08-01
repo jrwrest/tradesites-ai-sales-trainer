@@ -9,8 +9,10 @@ const {
   buildPasswordSetupUrl,
   buildVerificationUrl,
   createSignupRequest,
+  loadSignupRequests,
   notifyVerifiedSignupRequest,
   validatePasswordSetupToken,
+  purgeExpiredSignupRequests,
   verifySignupEmail,
 } = require("../src/signupRequests");
 
@@ -39,6 +41,26 @@ beforeEach(async () => {
   process.env.DATA_DIR = tempDataDir;
   process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
   process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
+});
+
+test("signup retention purges expired requests after the configured window", async () => {
+  await createSignupRequest(
+    { email: "expired@example.com" },
+    new Date("2026-01-01T00:00:00.000Z"),
+  );
+  await createSignupRequest(
+    { email: "recent@example.com" },
+    new Date("2026-07-25T00:00:00.000Z"),
+  );
+
+  const result = await purgeExpiredSignupRequests({
+    retentionDays: 30,
+    now: new Date("2026-08-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.deleted, 1);
+  const requests = await loadSignupRequests();
+  assert.deepEqual(requests.map((request) => request.email), ["recent@example.com"]);
 });
 
 afterEach(async () => {

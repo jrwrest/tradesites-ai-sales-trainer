@@ -8,7 +8,7 @@ runFixtureEval()
     console.log(
       `Fixture evals: ${summary.passed}/${summary.checked} checks passed across ${summary.fixtureCount} fixtures (${Math.round(
         summary.agreement * 100,
-      )}% agreement, ${summary.pending} pending future checks).`,
+      )}% agreement, weighted kappa ${summary.weightedKappa === null ? "n/a" : summary.weightedKappa.toFixed(3)} across ${summary.methodLabelCount} behavior labels, ${summary.pending} pending future checks).`,
     );
 
     for (const result of summary.results) {
@@ -25,7 +25,7 @@ runFixtureEval()
       }
     }
 
-    if (summary.agreement < PASS_THRESHOLD || summary.failed > 0) {
+    if (summary.agreement < PASS_THRESHOLD || summary.weightedKappa < 0.7 || summary.failed > 0) {
       process.exitCode = 1;
     }
   })

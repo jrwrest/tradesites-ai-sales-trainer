@@ -5,6 +5,7 @@ const { classifyRepTurn } = require("../src/dialogueManager");
 const { getScenario } = require("../src/scenarios");
 
 const enterpriseScenario = getScenario("enterprise-commercial-solar");
+const manufacturerScenario = getScenario("manufacturer-power-payback-report");
 
 function clearBrainEnv() {
   delete process.env.CODEX_BRAIN_COMMAND;
@@ -90,6 +91,59 @@ test("dialogue manager keeps existing-solar follow-up on the same objection", as
   assert.equal(reply.dialogue?.schedulerBlocked, true);
   assert.equal(reply.objectionId, "already-have-solar");
   assert.doesNotMatch(reply.text, /multiple sites|different leases|procurement|sustainability/i);
+});
+
+test("dialogue manager grants brief permission for manufacturer report context instead of generic send-info", async () => {
+  const repMessage =
+    "I am calling because the public site details suggest BSB may have a structural manufacturing site where energy use could be material. If I take 20 seconds, I can explain the report and you can tell me if it is irrelevant.";
+
+  const reply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: {
+      id: "dialogue-manager-manufacturer-report-permission",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: manufacturerScenario.persona.openingLine },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.dialogue?.customerAction, "grant_brief_permission");
+  assert.doesNotMatch(reply.text, /send me the information first/i);
+  assert.match(reply.text, /20 seconds|brief|checking|report|relevant/i);
+});
+
+test("dialogue manager keeps manufacturer existing-panel follow-up on report checks", async () => {
+  const repMessage =
+    "That may actually make the report more useful, because it checks whether the remaining roof, usage profile, and funded structure still stack up. Would you be against checking that before assuming it is covered?";
+
+  const reply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: {
+      id: "dialogue-manager-manufacturer-existing-panels",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: manufacturerScenario.persona.openingLine },
+        {
+          role: "persona",
+          text: "We might already have panels on the roof.",
+          objectionId: "power-payback-already-have-panels",
+          objectionType: "existing_solution",
+        },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.equal(reply.provider, "dialogue_manager");
+  assert.equal(reply.dialogue?.customerAction, "stay_on_existing_solar");
+  assert.equal(reply.objectionId, "power-payback-already-have-panels");
+  assert.doesNotMatch(reply.text, /send me the information first/i);
+  assert.match(reply.text, /current|panels|roof|load|check|monitor/i);
 });
 
 test("dialogue manager keeps unresolved gatekeeper context in repair instead of scheduling objections", async () => {

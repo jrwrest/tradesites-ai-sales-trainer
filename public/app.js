@@ -275,6 +275,13 @@ function renderScore(evaluation) {
   main.textContent = `${evaluation.overallScore}/10`;
   wrapper.append(main);
 
+  const methodMeta = document.createElement("p");
+  methodMeta.className = "muted";
+  const confidence = evaluation.methodEvaluation?.overallConfidence || "unknown";
+  const packVersion = evaluation.methodEvaluation?.methodPack?.version || "unversioned";
+  methodMeta.textContent = `Source-grounded method score · ${confidence} evidence confidence · pack ${packVersion}`;
+  wrapper.append(methodMeta);
+
   Object.entries(evaluation.categories).forEach(([name, value]) => {
     const row = document.createElement("div");
     row.className = "score-row";
@@ -291,13 +298,29 @@ function renderScore(evaluation) {
   feedback.textContent = evaluation.recommendedDrill;
   wrapper.append(feedback);
 
-  const drill = state.session?.assignedDrill || evaluation.assignedDrill;
+  const criticalGates = evaluation.methodEvaluation?.criticalGates || [];
+  const gateAlerts = criticalGates.filter((gate) => gate.status === "fail" || gate.status === "review");
+  if (gateAlerts.length) {
+    const gateList = document.createElement("ul");
+    gateAlerts.forEach((gate) => {
+      const item = document.createElement("li");
+      item.textContent = `${gate.status === "fail" ? "Gate failed" : "Needs review"}: ${gate.label}`;
+      gateList.append(item);
+    });
+    wrapper.append(gateList);
+  }
+
+  const drill = state.session?.methodDrill
+    || evaluation.methodEvaluation?.assignedDrill
+    || state.session?.assignedDrill
+    || evaluation.assignedDrill;
+  const drillId = drill?.behaviorId || drill?.skill;
   const drillBox = document.createElement("section");
   drillBox.className = "next-drill";
   const drillTitle = document.createElement("h3");
-  drillTitle.textContent = drill?.skill ? "Next Drill" : "No Drill Assigned";
+  drillTitle.textContent = drillId ? "Next Drill" : "No Drill Assigned";
   const drillSkill = document.createElement("strong");
-  drillSkill.textContent = drill?.skill ? drill.skill.replaceAll("_", " ") : "Keep practising";
+  drillSkill.textContent = drillId ? drillId.replaceAll("_", " ") : "Keep practising";
   const drillReason = document.createElement("p");
   drillReason.textContent = drill?.reason || "This call did not produce a specific weak-skill drill.";
   drillBox.append(drillTitle, drillSkill, drillReason);
@@ -511,7 +534,41 @@ function renderProfile(profile) {
     }
   });
 
-  elements.coachCard.append(form);
+  const deletion = document.createElement("section");
+  deletion.className = "data-deletion";
+  const deletionTitle = document.createElement("h3");
+  deletionTitle.textContent = "Delete training data";
+  const deletionHelp = document.createElement("p");
+  deletionHelp.textContent = "This removes the trainer's saved copy of your calls, profile, and skill history. It does not delete your login account. Do not enter real prospect personal data in synthetic practice.";
+  const confirmation = document.createElement("input");
+  confirmation.placeholder = "Type DELETE MY TRAINING DATA";
+  confirmation.setAttribute("aria-label", "Deletion confirmation");
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "danger";
+  deleteButton.textContent = "Delete My Training Data";
+  deleteButton.disabled = true;
+  confirmation.addEventListener("input", () => {
+    deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
+  });
+  deleteButton.addEventListener("click", async () => {
+    deleteButton.disabled = true;
+    try {
+      await api("/api/account-data", {
+        method: "DELETE",
+        body: JSON.stringify({ confirmation: confirmation.value }),
+      });
+      clearActiveSession();
+      renderProfile({});
+      setStatus("Your saved training data was deleted.");
+    } catch (error) {
+      setStatus(error.message, true);
+      deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
+    }
+  });
+  deletion.append(deletionTitle, deletionHelp, confirmation, deleteButton);
+
+  elements.coachCard.append(form, deletion);
 }
 
 function updateTimer() {

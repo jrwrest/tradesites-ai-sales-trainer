@@ -105,6 +105,11 @@ async function verifyPocketBaseToken(token, options = {}) {
   return normalizePocketBaseAuth(payload).user;
 }
 
+async function checkPocketBaseHealth(options = {}) {
+  await pocketBaseRequest("/api/health", { fetchImpl: options.fetchImpl });
+  return true;
+}
+
 async function loginWithPocketBase({ email, password }, options = {}) {
   const payload = await pocketBaseRequest("/api/collections/users/auth-with-password", {
     method: "POST",
@@ -155,6 +160,7 @@ async function resolveRequestUser(req, { authRequired = false, verifyToken = ver
 
 module.exports = {
   LOCAL_USER,
+  checkPocketBaseHealth,
   getBearerToken,
   loginWithPocketBase,
   normalizePocketBaseAuth,

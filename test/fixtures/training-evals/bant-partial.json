@@ -1,0 +1,17 @@
+{
+  "id": "bant-partial",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep verifies budget and timing but misses need and authority.",
+  "turns": [
+    { "role": "persona", "text": "We may look at solar later this year." },
+    { "role": "user", "text": "What budget range is available, and when could implementation begin?" },
+    { "role": "persona", "text": "We have £100,000 and could start in November." }
+  ],
+  "expected": {
+    "method": {
+      "overallScore": { "min": 19, "max": 29 },
+      "behaviorLabels": { "bant_budget": 3, "bant_authority": 0, "bant_need": 0, "bant_timing": 3 },
+      "assignedDrillBehaviorId": "bant_authority"
+    }
+  }
+}

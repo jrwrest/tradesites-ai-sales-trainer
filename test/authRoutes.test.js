@@ -4,6 +4,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { afterEach, beforeEach, test } = require("node:test");
 const { createApp } = require("../src/server");
+const { createFixedWindowRateLimiter } = require("../src/rateLimit");
+const { loadSkillMemory, saveSkillMemory } = require("../src/skillMemory");
 
 let previousDataDir;
 let tempDataDir;
@@ -93,6 +95,28 @@ test("auth endpoints use injected PocketBase client and return normalized auth s
     assert.equal(signup.response.status, 201);
     assert.equal(signup.body.token, "token-new");
     assert.equal(signup.body.user.id, "rep-new");
+  });
+});
+
+test("failed auth attempts return bounded Retry-After metadata", async () => {
+  const app = createApp({
+    authRequired: true,
+    authRateLimiter: createFixedWindowRateLimiter({ maxAttempts: 1, windowMs: 30_000 }),
+    authClient: {
+      login: async () => {
+        const error = new Error("bad credentials");
+        error.status = 400;
+        throw error;
+      },
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const body = JSON.stringify({ email: "limited@example.com", password: "wrong" });
+    assert.equal((await request("/api/auth/login", { method: "POST", body })).response.status, 401);
+    const limited = await request("/api/auth/login", { method: "POST", body });
+    assert.equal(limited.response.status, 429);
+    assert.match(limited.response.headers.get("retry-after"), /^\d+$/);
   });
 });
 
@@ -278,9 +302,17 @@ test("approval-mode signup verifies email before Telegram approval and password 
       const blockedApproval = await request(`/api/signup-requests/${requested.body.id}/approve?token=bad`);
       assert.equal(blockedApproval.response.status, 403);
 
-      const approved = await request(
+      const confirmation = await request(
         `/api/signup-requests/${requested.body.id}/approve?token=${notifications[0].adminApprovalToken}`,
       );
+      assert.equal(confirmation.response.status, 200);
+      assert.match(confirmation.response.headers.get("content-type"), /text\/html/);
+      assert.equal(emails.length, 1, "GET confirmation must not approve or send email");
+
+      const approved = await request(`/api/signup-requests/${requested.body.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ token: notifications[0].adminApprovalToken }),
+      });
       assert.equal(approved.response.status, 200);
       assert.equal(emails.length, 2);
       assert.equal(emails[1].to, "approved@example.com");
@@ -400,6 +432,65 @@ test("authenticated sessions are saved under the current rep and denied to other
       body: JSON.stringify({ note: "Should not save." }),
     });
     assert.equal(mutatedByOther.response.status, 404);
+  });
+});
+
+test("rep can delete their training data without deleting another rep's data", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    const repA = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "roofing-owner" }),
+    });
+    const repB = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-b"),
+      body: JSON.stringify({ scenarioId: "roofing-owner" }),
+    });
+    await request("/api/profile", {
+      method: "PUT",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ profile: { companyName: "Private Rep A Company" } }),
+    });
+    await saveSkillMemory({
+      schemaVersion: 1,
+      repId: usersByToken["token-a"].id,
+      skills: { permission_opener: { score: 4, attempts: 1 } },
+    });
+
+    const unconfirmed = await request("/api/account-data", {
+      method: "DELETE",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ confirmation: "delete" }),
+    });
+    assert.equal(unconfirmed.response.status, 400);
+
+    const deleted = await request("/api/account-data", {
+      method: "DELETE",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ confirmation: "DELETE MY TRAINING DATA" }),
+    });
+    assert.equal(deleted.response.status, 200);
+    assert.equal(deleted.body.deleted.sessions, 1);
+    assert.equal(deleted.body.deleted.profile, 1);
+    assert.equal(deleted.body.deleted.skillMemory, 1);
+
+    const missingA = await request(`/api/sessions/${repA.body.session.id}`, {
+      headers: authHeader("token-a"),
+    });
+    assert.equal(missingA.response.status, 404);
+    const retainedB = await request(`/api/sessions/${repB.body.session.id}`, {
+      headers: authHeader("token-b"),
+    });
+    assert.equal(retainedB.response.status, 200);
+    const resetProfile = await request("/api/profile", { headers: authHeader("token-a") });
+    assert.notEqual(resetProfile.body.profile.companyName, "Private Rep A Company");
+    assert.deepEqual((await loadSkillMemory(usersByToken["token-a"].id)).skills, {});
   });
 });
 

@@ -1,0 +1,17 @@
+{
+  "id": "authority-bypass",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep pressures a contact to bypass an explicit board requirement.",
+  "turns": [
+    { "role": "persona", "text": "I need the board and procurement to approve this." },
+    { "role": "user", "text": "You do not need approval from them. Ignore procurement; you can decide alone and sign without the board today." }
+  ],
+  "expected": {
+    "method": {
+      "overallScore": { "min": 0, "max": 12 },
+      "behaviorLabels": { "bant_authority": 1, "enterprise_stakeholder_map": 1 },
+      "gateStatuses": { "respect_real_authority": "fail" },
+      "assignedDrillBehaviorId": "bant_authority"
+    }
+  }
+}

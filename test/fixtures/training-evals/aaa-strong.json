@@ -1,0 +1,15 @@
+{
+  "id": "aaa-strong",
+  "scenarioId": "enterprise-commercial-solar",
+  "summary": "Rep handles a send-information brush-off with a complete AAA loop and isolation question.",
+  "turns": [
+    { "role": "persona", "text": "Just send me information." },
+    { "role": "user", "text": "Fair, that makes sense. Other finance teams often say that because generic packs do not answer their investment question. What specifically would you need to see for this to be worth a second conversation?" }
+  ],
+  "expected": {
+    "method": {
+      "overallScore": { "min": 36, "max": 46 },
+      "behaviorLabels": { "closer_explain_concerns": 3, "objection_isolation": 3, "detail_question_intent": 0, "aaa_acknowledge": 3, "aaa_associate": 3, "aaa_ask": 3 }
+    }
+  }
+}

@@ -1,8 +1,9 @@
 const express = require("express");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { scenarios, getScenario } = require("./scenarios");
-const { ensureStore, listSessions, loadSession, saveSession } = require("./store");
+const { deleteSessionsForRep, ensureStore, listSessions, loadSession, saveSession } = require("./store");
 const {
   generateCustomerReply,
   getDialogueRenderMaxConcurrentGlobal,
@@ -13,12 +14,12 @@ const {
   isDialogueLlmRenderEnabled,
 } = require("./brain");
 const { scoreTranscript } = require("./scoring");
-const { getDueDrills, updateSkillMemory } = require("./skillMemory");
+const { deleteSkillMemory, getDueDrills, updateSkillMemory } = require("./skillMemory");
 const { generateGauntletPlan, scoreGauntletAnswer, scoreHardNoCleanExit, summarizeGauntlet } = require("./gauntlet");
 const { buildReviewQueue, buildSkillTrends } = require("./reviewQueue");
 const { findApprovedResponse, findApprovedResponseForDrill } = require("./approvedResponses");
 const { buildCoachingSuggestion, HELP_MOVES, inferStage } = require("./objectionPlaybook");
-const { loadProfile, saveProfile } = require("./profileStore");
+const { deleteProfile, loadProfile, saveProfile } = require("./profileStore");
 const {
   approveSignupRequest,
   buildPasswordSetupUrl,
@@ -27,16 +28,23 @@ const {
   createSignupRequest,
   notifyVerifiedSignupRequest,
   validatePasswordSetupToken,
+  validateSignupApprovalToken,
   verifySignupEmail,
 } = require("./signupRequests");
 const {
   LOCAL_USER,
+  checkPocketBaseHealth,
   loginWithPocketBase,
   resolveRequestUser,
   signupWithPocketBase,
   verifyPocketBaseToken,
 } = require("./auth");
 const { sendEmail } = require("./email");
+const { installGracefulShutdown } = require("./shutdown");
+const { loadMethodPack } = require("./methodPack");
+const { createFixedWindowRateLimiter } = require("./rateLimit");
+const { runRetention } = require("./retention");
+const { checkOpenClawGateway } = require("./openclawGateway");
 
 function getBrainProvider() {
   if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
@@ -79,12 +87,154 @@ function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = 
   }
 }
 
+function validateProductionConfig({ env = process.env } = {}) {
+  if (env.NODE_ENV !== "production") return;
+  const errors = [];
+  if (env.AUTH_REQUIRED !== "1") errors.push("AUTH_REQUIRED must be 1");
+  if (env.DATA_RETENTION_ENABLED !== "1") errors.push("DATA_RETENTION_ENABLED must be 1");
+  if (env.STORAGE_MODE !== "single-instance-json") {
+    errors.push("STORAGE_MODE must explicitly be single-instance-json");
+  }
+  if (!env.DATA_DIR || !path.isAbsolute(env.DATA_DIR)) errors.push("DATA_DIR must be absolute");
+  if (!env.BACKUP_ROOT || !path.isAbsolute(env.BACKUP_ROOT)) errors.push("BACKUP_ROOT must be absolute");
+  if (env.DATA_DIR && env.BACKUP_ROOT && path.isAbsolute(env.DATA_DIR) && path.isAbsolute(env.BACKUP_ROOT)) {
+    const data = path.resolve(env.DATA_DIR);
+    const backup = path.resolve(env.BACKUP_ROOT);
+    const backupWithinData = path.relative(data, backup);
+    const dataWithinBackup = path.relative(backup, data);
+    const isWithin = (relative) => relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+    if (isWithin(backupWithinData) || isWithin(dataWithinBackup)) {
+      errors.push("BACKUP_ROOT must not overlap DATA_DIR");
+    }
+  }
+  for (const name of [
+    "SESSION_RETENTION_DAYS",
+    "SIGNUP_REQUEST_RETENTION_DAYS",
+    "RETENTION_INTERVAL_MS",
+    "AUTH_RATE_LIMIT_ATTEMPTS",
+    "AUTH_RATE_LIMIT_WINDOW_MS",
+    "AUTH_RATE_LIMIT_MAX_KEYS",
+  ]) {
+    if (env[name] !== undefined && (!Number.isInteger(Number(env[name])) || Number(env[name]) <= 0)) {
+      errors.push(`${name} must be a positive integer`);
+    }
+  }
+  try {
+    if (new URL(env.PUBLIC_BASE_URL || "").protocol !== "https:") {
+      errors.push("PUBLIC_BASE_URL must use https");
+    }
+  } catch {
+    errors.push("PUBLIC_BASE_URL must be a valid https URL");
+  }
+  if ((env.SIGNUP_MODE || "disabled") === "open" && env.ALLOW_PUBLIC_SIGNUP !== "1") {
+    errors.push("open signup requires ALLOW_PUBLIC_SIGNUP=1");
+  }
+  if (env.OPENCLAW_GATEWAY_URL) {
+    if (!env.OPENCLAW_GATEWAY_TOKEN) errors.push("OPENCLAW_GATEWAY_TOKEN is required");
+    if (env.OPENCLAW_AGENT_ID !== "sales-trainer-customer") {
+      errors.push("OPENCLAW_AGENT_ID must be sales-trainer-customer");
+    }
+    if (env.OPENCLAW_DATA_POLICY_ACK !== "1") {
+      errors.push("OPENCLAW_DATA_POLICY_ACK must be 1");
+    }
+  }
+  if (errors.length) throw new Error(`Production config invalid: ${errors.join("; ")}`);
+}
+
 function sendApiError(req, res, status, code, message) {
   res.status(status).json({
     error: message,
     code,
     requestId: req.requestId,
   });
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[character]);
+}
+
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "media-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ].join("; "),
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Permissions-Policy": "camera=(), geolocation=(), microphone=(self)",
+  "Referrer-Policy": "no-referrer",
+  "Strict-Transport-Security": "max-age=31536000",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+};
+
+function defaultLogger() {
+  if (process.env.NODE_TEST_CONTEXT) {
+    return { info() {}, error() {} };
+  }
+  return {
+    info(entry) {
+      console.log(JSON.stringify(entry));
+    },
+    error(entry) {
+      console.error(JSON.stringify(entry));
+    },
+  };
+}
+
+function defaultReadinessChecks({ authRequired }) {
+  return [
+    { name: "store", required: true, check: ensureStore },
+    ...(process.env.NODE_ENV === "production"
+      ? [{
+        name: "data_lifecycle",
+        required: true,
+        check: async () => {
+          validateProductionConfig();
+          await fs.access(path.resolve(process.env.BACKUP_ROOT), 6);
+          return true;
+        },
+      }]
+      : []),
+    ...(authRequired
+      ? [{ name: "auth", required: true, check: checkPocketBaseHealth }]
+      : []),
+    ...(process.env.OPENCLAW_GATEWAY_URL
+      ? [{ name: "openclaw", required: true, check: checkOpenClawGateway }]
+      : []),
+    {
+      name: "dialogue_provider",
+      required: false,
+      check: async () => !isDialogueLlmRenderEnabled() || getBrainProvider() !== "mock",
+    },
+  ];
+}
+
+async function readinessReport(checks) {
+  const results = await Promise.all(checks.map(async ({ name, required = true, check }) => {
+    try {
+      const value = await check();
+      return { name, required, ok: value !== false };
+    } catch {
+      return { name, required, ok: false };
+    }
+  }));
+  return {
+    ok: results.every((result) => !result.required || result.ok),
+    checks: results,
+  };
 }
 
 function createApp(options = {}) {
@@ -103,15 +253,43 @@ function createApp(options = {}) {
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
   const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
   const customerReplyRenderProvider = options.customerReplyRenderProvider;
-  const authAttempts = new Map();
+  const methodPack = options.methodPack || loadMethodPack();
+  const logger = options.logger || defaultLogger();
+  const startedAt = Date.now();
+  const runtimeRequests = { total: 0, byStatus: {} };
+  const readinessChecks = options.readinessChecks || defaultReadinessChecks({ authRequired });
+  const authRateLimiter = options.authRateLimiter || createFixedWindowRateLimiter({
+    maxAttempts: Number(process.env.AUTH_RATE_LIMIT_ATTEMPTS || 20),
+    windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+    maxKeys: Number(process.env.AUTH_RATE_LIMIT_MAX_KEYS || 10000),
+  });
   const app = express();
   const publicDir = path.join(__dirname, "..", "public");
-  app.use(express.json({ limit: "1mb" }));
+  app.disable("x-powered-by");
   app.use((req, res, next) => {
     req.requestId = crypto.randomUUID();
     res.setHeader("X-Request-Id", req.requestId);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      res.setHeader(name, value);
+    }
+    const requestStartedAt = process.hrtime.bigint();
+    res.on("finish", () => {
+      const statusBucket = `${Math.floor(res.statusCode / 100)}xx`;
+      runtimeRequests.total += 1;
+      runtimeRequests.byStatus[statusBucket] = (runtimeRequests.byStatus[statusBucket] || 0) + 1;
+      logger.info({
+        event: "http_request",
+        requestId: req.requestId,
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs: Number(((Number(process.hrtime.bigint() - requestStartedAt)) / 1e6).toFixed(2)),
+      });
+    });
     next();
   });
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "16kb" }));
   app.get("/", (_req, res) => {
     res.sendFile(path.join(publicDir, "home.html"));
   });
@@ -151,26 +329,44 @@ function createApp(options = {}) {
         signupEnabled,
         signupMode,
       },
+      runtime: {
+        uptimeSeconds: Number(((Date.now() - startedAt) / 1000).toFixed(3)),
+        requests: {
+          total: runtimeRequests.total,
+          byStatus: { ...runtimeRequests.byStatus },
+        },
+      },
+      methodPack: {
+        id: methodPack.manifest.id,
+        version: methodPack.manifest.version,
+        status: methodPack.manifest.status,
+      },
     });
+  });
+
+  app.get("/api/method-pack", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
+    res.json(methodPack);
+  });
+
+  app.get("/api/ready", async (_req, res) => {
+    const report = await readinessReport(readinessChecks);
+    res.status(report.ok ? 200 : 503).json(report);
   });
 
   app.get("/api/scenarios", (_req, res) => {
     res.json({ scenarios });
   });
 
-  function isAuthRateLimited(req, email) {
-    const now = Date.now();
-    const key = `${req.ip || "unknown"}:${email.toLowerCase()}`;
-    const windowMs = 15 * 60 * 1000;
-    const maxAttempts = 20;
-    const entry = authAttempts.get(key) || { count: 0, resetAt: now + windowMs };
-    if (entry.resetAt <= now) {
-      entry.count = 0;
-      entry.resetAt = now + windowMs;
-    }
-    entry.count += 1;
-    authAttempts.set(key, entry);
-    return entry.count > maxAttempts;
+  function authRateLimitKey(req, email) {
+    return `${req.ip || "unknown"}:${String(email || "").toLowerCase()}`;
+  }
+
+  function enforceAuthRateLimit(req, res, email) {
+    const result = authRateLimiter.consume(authRateLimitKey(req, email));
+    if (!result.limited) return false;
+    res.setHeader("Retry-After", String(result.retryAfterSeconds));
+    return true;
   }
 
   async function sendVerificationEmail(request, token) {
@@ -222,11 +418,12 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "credentials_required", "Email and password are required");
         return;
       }
-      if (isAuthRateLimited(req, email)) {
+      if (enforceAuthRateLimit(req, res, email)) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many login attempts");
         return;
       }
       const auth = await authClient.login({ email, password });
+      authRateLimiter.reset(authRateLimitKey(req, email));
       res.json(auth);
     } catch (error) {
       error.code = error.status && error.status < 500 ? "AUTH_INVALID" : "AUTH_UNAVAILABLE";
@@ -247,7 +444,7 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "credentials_required", "Email and password are required");
         return;
       }
-      if (isAuthRateLimited(req, email)) {
+      if (enforceAuthRateLimit(req, res, email)) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
@@ -262,6 +459,7 @@ function createApp(options = {}) {
         return;
       }
       const auth = await authClient.signup({ email, password, name });
+      authRateLimiter.reset(authRateLimitKey(req, email));
       res.status(201).json(auth);
     } catch (error) {
       error.code = error.status && error.status < 500 ? "AUTH_INVALID" : "AUTH_UNAVAILABLE";
@@ -276,7 +474,7 @@ function createApp(options = {}) {
         return;
       }
       const email = String(req.body.email || "").trim();
-      if (email && isAuthRateLimited(req, email)) {
+      if (email && enforceAuthRateLimit(req, res, email)) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
@@ -305,11 +503,12 @@ function createApp(options = {}) {
       const request = await verifySignupEmail(req.params.id, String(req.query.token || ""));
       await verifiedSignupNotifier(request);
       res.type("text/html").send([
-        "<!doctype html><title>Email verified</title>",
-        "<main style=\"font-family: system-ui; max-width: 680px; margin: 48px auto; line-height: 1.5;\">",
-        "<h1>Email verified</h1>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>Email verified</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>",
+        "<body><section class=\"auth-gate\"><div class=\"auth-card\"><h1>Email verified</h1>",
         "<p>Your email is verified. An admin will review the request and email you a password setup link after approval.</p>",
-        "</main>",
+        "</div></section></body></html>",
       ].join(""));
     } catch (error) {
       if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
@@ -335,8 +534,55 @@ function createApp(options = {}) {
         res.status(403).type("text/plain").send("Invalid approval token");
         return;
       }
+      const request = await validateSignupApprovalToken(req.params.id, approvalToken);
+      res.setHeader("Cache-Control", "no-store");
+      res.type("text/html").send([
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>Confirm account approval</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>",
+        "<body><section class=\"auth-gate\"><div class=\"auth-card\">",
+        "<h1>Confirm account approval</h1>",
+        `<p>Approve ${escapeHtml(request.email)} and send their one-time password setup link?</p>`,
+        `<form method=\"post\" action=\"/api/signup-requests/${escapeHtml(request.id)}/approve\">`,
+        `<input type=\"hidden\" name=\"token\" value=\"${escapeHtml(approvalToken)}\">`,
+        "<button type=\"submit\">Approve account</button></form>",
+        "</div></section></body></html>",
+      ].join(""));
+    } catch (error) {
+      if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
+        res.status(404).type("text/plain").send("Signup request not found");
+        return;
+      }
+      if (error.code === "SIGNUP_REQUEST_NOT_VERIFIED") {
+        res.status(409).type("text/plain").send("Signup request has not verified email yet");
+        return;
+      }
+      if (error.code === "SIGNUP_APPROVAL_TOKEN_INVALID") {
+        res.status(403).type("text/plain").send("Invalid approval token");
+        return;
+      }
+      if (error.code === "SIGNUP_APPROVAL_TOKEN_EXPIRED") {
+        res.status(403).type("text/plain").send("Approval token expired");
+        return;
+      }
+      if (error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" || error.code === "EMAIL_FROM_REQUIRED") {
+        res.status(503).type("text/plain").send("Email delivery is not configured");
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/signup-requests/:id/approve", async (req, res, next) => {
+    try {
+      const approvalToken = String((req.body && req.body.token) || "");
+      if (!approvalToken) {
+        res.status(403).type("text/plain").send("Invalid approval token");
+        return;
+      }
       const { request, passwordSetupToken } = await approveSignupRequest(req.params.id, approvalToken);
       await sendPasswordSetupEmail(request, passwordSetupToken);
+      res.setHeader("Cache-Control", "no-store");
       res.type("text/plain").send(`${request.email} approved. Password setup email sent.`);
     } catch (error) {
       if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
@@ -380,11 +626,12 @@ function createApp(options = {}) {
         return;
       }
       const request = await validatePasswordSetupToken(req.params.id, token);
-      if (isAuthRateLimited(req, request.email)) {
+      if (enforceAuthRateLimit(req, res, request.email)) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
       const auth = await authClient.signup({ email: request.email, password, name: request.name });
+      authRateLimiter.reset(authRateLimitKey(req, request.email));
       await consumeSignupRequest(request.id);
       res.status(201).json(auth);
     } catch (error) {
@@ -416,6 +663,37 @@ function createApp(options = {}) {
 
   app.get("/api/auth/me", (req, res) => {
     res.json({ user: req.user || LOCAL_USER, authRequired });
+  });
+
+  app.delete("/api/account-data", async (req, res, next) => {
+    try {
+      if (String(req.body.confirmation || "") !== "DELETE MY TRAINING DATA") {
+        sendApiError(
+          req,
+          res,
+          400,
+          "deletion_confirmation_required",
+          "Type DELETE MY TRAINING DATA to confirm.",
+        );
+        return;
+      }
+      const [sessions, profile, skillMemory] = await Promise.all([
+        deleteSessionsForRep(req.user.id),
+        deleteProfile(req.user.id),
+        deleteSkillMemory(req.user.id),
+      ]);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({
+        deleted: {
+          sessions: sessions.deleted,
+          profile: profile.deleted,
+          skillMemory: skillMemory.deleted,
+        },
+        accountDeleted: false,
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get("/api/profile", async (req, res, next) => {
@@ -479,6 +757,10 @@ function createApp(options = {}) {
         id: crypto.randomUUID(),
         repId: req.user.id,
         scenarioId: scenario.id,
+        methodPack: {
+          id: methodPack.manifest.id,
+          version: methodPack.manifest.version,
+        },
         status: "active",
         startedAt: now,
         endedAt: null,
@@ -519,6 +801,10 @@ function createApp(options = {}) {
         id: crypto.randomUUID(),
         repId: req.user.id,
         scenarioId: scenario.id,
+        methodPack: {
+          id: methodPack.manifest.id,
+          version: methodPack.manifest.version,
+        },
         status: "active",
         startedAt: now,
         endedAt: null,
@@ -565,6 +851,10 @@ function createApp(options = {}) {
       const text = String(req.body.text || "").trim();
       if (!text) {
         sendApiError(req, res, 400, "message_required", "Message text is required");
+        return;
+      }
+      if (text.length > 5000) {
+        sendApiError(req, res, 413, "message_too_long", "Message text is too long");
         return;
       }
 
@@ -687,7 +977,9 @@ function createApp(options = {}) {
         scenario: getScenario(session.scenarioId),
         turns: session.turns,
         helpAttempts: session.helpAttempts || [],
+        methodPack,
       });
+      session.methodDrill = session.evaluation.methodEvaluation.assignedDrill;
       session.assignedDrill = session.evaluation.assignedDrill;
       session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill);
       await updateSkillMemory({ session, evaluation: session.evaluation });
@@ -755,6 +1047,10 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "note_required", "Note text is required");
         return;
       }
+      if (note.length > 4000) {
+        sendApiError(req, res, 413, "note_too_long", "Note text is too long");
+        return;
+      }
       const session = await loadOwnedSession(req, req.params.id);
       session.coachNotes = [
         ...(session.coachNotes || []),
@@ -791,6 +1087,10 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "message_required", "Message text is required");
         return;
       }
+      if (text.length > 5000) {
+        sendApiError(req, res, 413, "message_too_long", "Message text is too long");
+        return;
+      }
       const session = {
         id: "stateless",
         repId: req.user.id,
@@ -813,7 +1113,7 @@ function createApp(options = {}) {
     try {
       const scenario = getScenario(req.body.scenarioId);
       const turns = Array.isArray(req.body.turns) ? req.body.turns : [];
-      res.json({ evaluation: scoreTranscript({ scenario, turns }) });
+      res.json({ evaluation: scoreTranscript({ scenario, turns, methodPack }) });
     } catch (error) {
       next(error);
     }
@@ -846,14 +1146,18 @@ function createApp(options = {}) {
       sendApiError(req, res, 404, "not_found", "Not found");
       return;
     }
-    console.error(
-      JSON.stringify({
+    if (error.code === "SESSION_CONFLICT") {
+      sendApiError(req, res, 409, "session_conflict", "Session changed; reload and try again");
+      return;
+    }
+    logger.error(
+      {
         level: "error",
         requestId: req.requestId,
         route: req.originalUrl,
         code: error.code || "internal_error",
         errorType: error.name || "Error",
-      }),
+      },
     );
     sendApiError(req, res, 500, "internal_error", "Internal server error");
   });
@@ -862,7 +1166,13 @@ function createApp(options = {}) {
 }
 
 async function start() {
+  validateProductionConfig();
+  if (process.env.BACKUP_ROOT) {
+    await fs.mkdir(path.resolve(process.env.BACKUP_ROOT), { recursive: true, mode: 0o700 });
+    await fs.access(path.resolve(process.env.BACKUP_ROOT), 6);
+  }
   await ensureStore();
+  if (process.env.DATA_RETENTION_ENABLED === "1") await runRetention();
   const app = createApp();
   const port = Number(process.env.PORT || 3137);
   const host = process.env.HOST || "127.0.0.1";
@@ -879,6 +1189,19 @@ async function start() {
     console.error(`Failed to start server on ${host}:${port}: ${error.message}`);
     process.exit(1);
   });
+  installGracefulShutdown(server);
+  if (process.env.DATA_RETENTION_ENABLED === "1") {
+    const intervalMs = Number(process.env.RETENTION_INTERVAL_MS || 24 * 60 * 60 * 1000);
+    const retentionTimer = setInterval(() => {
+      runRetention().then((result) => {
+        console.log(JSON.stringify({ event: "retention_complete", ...result }));
+      }).catch((error) => {
+        console.error(JSON.stringify({ event: "retention_failed", errorType: error.name || "Error" }));
+      });
+    }, Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 24 * 60 * 60 * 1000);
+    retentionTimer.unref?.();
+    server.once("close", () => clearInterval(retentionTimer));
+  }
   return server;
 }
 
@@ -895,8 +1218,11 @@ if (require.main === module) {
 
 module.exports = {
   createApp,
+  defaultReadinessChecks,
   getBrainProvider,
   start,
+  readinessReport,
   validateApprovalModeConfig,
+  validateProductionConfig,
   validateServerConfig,
 };
