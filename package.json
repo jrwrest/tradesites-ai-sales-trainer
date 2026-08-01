@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Free open-source AI sales trainer for contractors winning bigger commercial jobs.",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=20 <27"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
@@ -10,6 +13,7 @@
     "pb:start": "./pocketbase serve --http 127.0.0.1:8090",
     "validate:auth": "node scripts/validate-pocketbase-login.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "security:audit": "npm audit --omit=dev --audit-level=high",
     "test": "node --test"
   },
   "keywords": [
@@ -24,10 +28,10 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.2.1",
-    "nodemailer": "^7.0.13",
-    "ws": "^8.20.1"
+    "nodemailer": "^9.0.3",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
-    "playwright": "^1.60.0"
+    "playwright": "^1.62.1"
   }
 }

@@ -98,10 +98,86 @@ test("serves scenarios and health", async () => {
   assert.equal(health.body.dialogueRendering.maxConcurrentPerUser, 2);
   assert.equal(health.body.dialogueRendering.maxConcurrentGlobal, 10);
   assert.equal(typeof health.body.dialogueRendering.stats.attempts, "number");
+  assert.equal(typeof health.body.runtime.uptimeSeconds, "number");
+  assert.equal(typeof health.body.runtime.requests.total, "number");
 
   const scenarios = await request("/api/scenarios");
   assert.equal(scenarios.response.status, 200);
   assert.ok(scenarios.body.scenarios.length >= 1);
+});
+
+test("responses include production security headers and suppress framework disclosure", async () => {
+  const response = await fetch(`${baseUrl}/app`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-powered-by"), null);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(response.headers.get("cross-origin-opener-policy"), "same-origin");
+  assert.match(response.headers.get("strict-transport-security"), /max-age=31536000/);
+  assert.match(response.headers.get("permissions-policy"), /microphone=\(self\)/);
+  assert.match(response.headers.get("content-security-policy"), /default-src 'self'/);
+  assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.match(response.headers.get("x-request-id"), /^[0-9a-f-]{36}$/);
+});
+
+test("readiness fails closed when a required dependency is unavailable", async () => {
+  const app = createApp({
+    authRequired: false,
+    readinessChecks: [
+      { name: "store", required: true, check: async () => true },
+      { name: "auth", required: true, check: async () => { throw new Error("secret upstream detail"); } },
+      { name: "dialogue_provider", required: false, check: async () => false },
+    ],
+  });
+  let localServer;
+  try {
+    await new Promise((resolve) => {
+      localServer = app.listen(0, "127.0.0.1", resolve);
+    });
+    const response = await fetch(`http://127.0.0.1:${localServer.address().port}/api/ready`);
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(body.ok, false);
+    assert.deepEqual(body.checks, [
+      { name: "store", required: true, ok: true },
+      { name: "auth", required: true, ok: false },
+      { name: "dialogue_provider", required: false, ok: false },
+    ]);
+    assert.doesNotMatch(JSON.stringify(body), /secret upstream detail/);
+  } finally {
+    if (localServer) await new Promise((resolve) => localServer.close(resolve));
+  }
+});
+
+test("request telemetry records safe structured metadata", async () => {
+  const entries = [];
+  const app = createApp({
+    authRequired: false,
+    logger: { info: (entry) => entries.push(entry), error: () => {} },
+  });
+  let localServer;
+  try {
+    await new Promise((resolve) => {
+      localServer = app.listen(0, "127.0.0.1", resolve);
+    });
+    const response = await fetch(`http://127.0.0.1:${localServer.address().port}/api/health?token=do-not-log`, {
+      headers: { Authorization: "Bearer do-not-log" },
+    });
+    assert.equal(response.status, 200);
+
+    const entry = entries.find((candidate) => candidate.event === "http_request");
+    assert.equal(entry.method, "GET");
+    assert.equal(entry.path, "/api/health");
+    assert.equal(entry.status, 200);
+    assert.equal(typeof entry.durationMs, "number");
+    assert.match(entry.requestId, /^[0-9a-f-]{36}$/);
+    assert.doesNotMatch(JSON.stringify(entry), /do-not-log/);
+  } finally {
+    if (localServer) await new Promise((resolve) => localServer.close(resolve));
+  }
 });
 
 test("health exposes dialogue render flag and timeout", async () => {

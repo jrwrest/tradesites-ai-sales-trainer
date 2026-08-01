@@ -193,9 +193,7 @@ async function verifySignupEmail(id, token, now = new Date()) {
   return { ...request, adminApprovalToken };
 }
 
-async function approveSignupRequest(id, token, now = new Date()) {
-  const requests = await loadSignupRequests();
-  const request = requests.find((item) => item.id === id);
+function assertApprovalRequest(request, token, now = new Date()) {
   if (!request) {
     const error = new Error("Signup request not found");
     error.code = "SIGNUP_REQUEST_NOT_FOUND";
@@ -221,6 +219,17 @@ async function approveSignupRequest(id, token, now = new Date()) {
     error.code = "SIGNUP_APPROVAL_TOKEN_EXPIRED";
     throw error;
   }
+  return request;
+}
+
+async function validateSignupApprovalToken(id, token, now = new Date()) {
+  const requests = await loadSignupRequests();
+  return assertApprovalRequest(requests.find((item) => item.id === id), token, now);
+}
+
+async function approveSignupRequest(id, token, now = new Date()) {
+  const requests = await loadSignupRequests();
+  const request = assertApprovalRequest(requests.find((item) => item.id === id), token, now);
 
   const passwordSetupToken = createPlainToken();
   request.status = STATUS.APPROVED;
@@ -340,5 +349,6 @@ module.exports = {
   notifyVerifiedSignupRequest,
   normalizeEmail,
   validatePasswordSetupToken,
+  validateSignupApprovalToken,
   verifySignupEmail,
 };

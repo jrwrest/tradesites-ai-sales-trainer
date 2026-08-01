@@ -278,9 +278,17 @@ test("approval-mode signup verifies email before Telegram approval and password 
       const blockedApproval = await request(`/api/signup-requests/${requested.body.id}/approve?token=bad`);
       assert.equal(blockedApproval.response.status, 403);
 
-      const approved = await request(
+      const confirmation = await request(
         `/api/signup-requests/${requested.body.id}/approve?token=${notifications[0].adminApprovalToken}`,
       );
+      assert.equal(confirmation.response.status, 200);
+      assert.match(confirmation.response.headers.get("content-type"), /text\/html/);
+      assert.equal(emails.length, 1, "GET confirmation must not approve or send email");
+
+      const approved = await request(`/api/signup-requests/${requested.body.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ token: notifications[0].adminApprovalToken }),
+      });
       assert.equal(approved.response.status, 200);
       assert.equal(emails.length, 2);
       assert.equal(emails[1].to, "approved@example.com");

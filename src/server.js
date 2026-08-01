@@ -27,16 +27,19 @@ const {
   createSignupRequest,
   notifyVerifiedSignupRequest,
   validatePasswordSetupToken,
+  validateSignupApprovalToken,
   verifySignupEmail,
 } = require("./signupRequests");
 const {
   LOCAL_USER,
+  checkPocketBaseHealth,
   loginWithPocketBase,
   resolveRequestUser,
   signupWithPocketBase,
   verifyPocketBaseToken,
 } = require("./auth");
 const { sendEmail } = require("./email");
+const { installGracefulShutdown } = require("./shutdown");
 
 function getBrainProvider() {
   if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
@@ -87,6 +90,80 @@ function sendApiError(req, res, status, code, message) {
   });
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[character]);
+}
+
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "media-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ].join("; "),
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Permissions-Policy": "camera=(), geolocation=(), microphone=(self)",
+  "Referrer-Policy": "no-referrer",
+  "Strict-Transport-Security": "max-age=31536000",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+};
+
+function defaultLogger() {
+  if (process.env.NODE_TEST_CONTEXT) {
+    return { info() {}, error() {} };
+  }
+  return {
+    info(entry) {
+      console.log(JSON.stringify(entry));
+    },
+    error(entry) {
+      console.error(JSON.stringify(entry));
+    },
+  };
+}
+
+function defaultReadinessChecks({ authRequired }) {
+  return [
+    { name: "store", required: true, check: ensureStore },
+    ...(authRequired
+      ? [{ name: "auth", required: true, check: checkPocketBaseHealth }]
+      : []),
+    {
+      name: "dialogue_provider",
+      required: false,
+      check: async () => !isDialogueLlmRenderEnabled() || getBrainProvider() !== "mock",
+    },
+  ];
+}
+
+async function readinessReport(checks) {
+  const results = await Promise.all(checks.map(async ({ name, required = true, check }) => {
+    try {
+      const value = await check();
+      return { name, required, ok: value !== false };
+    } catch {
+      return { name, required, ok: false };
+    }
+  }));
+  return {
+    ok: results.every((result) => !result.required || result.ok),
+    checks: results,
+  };
+}
+
 function createApp(options = {}) {
   const authRequired = options.authRequired ?? process.env.AUTH_REQUIRED !== "0";
   const signupMode = options.signupMode || process.env.SIGNUP_MODE || (process.env.SIGNUP_ENABLED === "1" ? "open" : "disabled");
@@ -103,15 +180,38 @@ function createApp(options = {}) {
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
   const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
   const customerReplyRenderProvider = options.customerReplyRenderProvider;
+  const logger = options.logger || defaultLogger();
+  const startedAt = Date.now();
+  const runtimeRequests = { total: 0, byStatus: {} };
+  const readinessChecks = options.readinessChecks || defaultReadinessChecks({ authRequired });
   const authAttempts = new Map();
   const app = express();
   const publicDir = path.join(__dirname, "..", "public");
-  app.use(express.json({ limit: "1mb" }));
+  app.disable("x-powered-by");
   app.use((req, res, next) => {
     req.requestId = crypto.randomUUID();
     res.setHeader("X-Request-Id", req.requestId);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      res.setHeader(name, value);
+    }
+    const requestStartedAt = process.hrtime.bigint();
+    res.on("finish", () => {
+      const statusBucket = `${Math.floor(res.statusCode / 100)}xx`;
+      runtimeRequests.total += 1;
+      runtimeRequests.byStatus[statusBucket] = (runtimeRequests.byStatus[statusBucket] || 0) + 1;
+      logger.info({
+        event: "http_request",
+        requestId: req.requestId,
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs: Number(((Number(process.hrtime.bigint() - requestStartedAt)) / 1e6).toFixed(2)),
+      });
+    });
     next();
   });
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "16kb" }));
   app.get("/", (_req, res) => {
     res.sendFile(path.join(publicDir, "home.html"));
   });
@@ -151,7 +251,19 @@ function createApp(options = {}) {
         signupEnabled,
         signupMode,
       },
+      runtime: {
+        uptimeSeconds: Number(((Date.now() - startedAt) / 1000).toFixed(3)),
+        requests: {
+          total: runtimeRequests.total,
+          byStatus: { ...runtimeRequests.byStatus },
+        },
+      },
     });
+  });
+
+  app.get("/api/ready", async (_req, res) => {
+    const report = await readinessReport(readinessChecks);
+    res.status(report.ok ? 200 : 503).json(report);
   });
 
   app.get("/api/scenarios", (_req, res) => {
@@ -305,11 +417,12 @@ function createApp(options = {}) {
       const request = await verifySignupEmail(req.params.id, String(req.query.token || ""));
       await verifiedSignupNotifier(request);
       res.type("text/html").send([
-        "<!doctype html><title>Email verified</title>",
-        "<main style=\"font-family: system-ui; max-width: 680px; margin: 48px auto; line-height: 1.5;\">",
-        "<h1>Email verified</h1>",
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>Email verified</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>",
+        "<body><section class=\"auth-gate\"><div class=\"auth-card\"><h1>Email verified</h1>",
         "<p>Your email is verified. An admin will review the request and email you a password setup link after approval.</p>",
-        "</main>",
+        "</div></section></body></html>",
       ].join(""));
     } catch (error) {
       if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
@@ -335,8 +448,55 @@ function createApp(options = {}) {
         res.status(403).type("text/plain").send("Invalid approval token");
         return;
       }
+      const request = await validateSignupApprovalToken(req.params.id, approvalToken);
+      res.setHeader("Cache-Control", "no-store");
+      res.type("text/html").send([
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>Confirm account approval</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>",
+        "<body><section class=\"auth-gate\"><div class=\"auth-card\">",
+        "<h1>Confirm account approval</h1>",
+        `<p>Approve ${escapeHtml(request.email)} and send their one-time password setup link?</p>`,
+        `<form method=\"post\" action=\"/api/signup-requests/${escapeHtml(request.id)}/approve\">`,
+        `<input type=\"hidden\" name=\"token\" value=\"${escapeHtml(approvalToken)}\">`,
+        "<button type=\"submit\">Approve account</button></form>",
+        "</div></section></body></html>",
+      ].join(""));
+    } catch (error) {
+      if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
+        res.status(404).type("text/plain").send("Signup request not found");
+        return;
+      }
+      if (error.code === "SIGNUP_REQUEST_NOT_VERIFIED") {
+        res.status(409).type("text/plain").send("Signup request has not verified email yet");
+        return;
+      }
+      if (error.code === "SIGNUP_APPROVAL_TOKEN_INVALID") {
+        res.status(403).type("text/plain").send("Invalid approval token");
+        return;
+      }
+      if (error.code === "SIGNUP_APPROVAL_TOKEN_EXPIRED") {
+        res.status(403).type("text/plain").send("Approval token expired");
+        return;
+      }
+      if (error.code === "EMAIL_DELIVERY_NOT_CONFIGURED" || error.code === "EMAIL_FROM_REQUIRED") {
+        res.status(503).type("text/plain").send("Email delivery is not configured");
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/signup-requests/:id/approve", async (req, res, next) => {
+    try {
+      const approvalToken = String((req.body && req.body.token) || "");
+      if (!approvalToken) {
+        res.status(403).type("text/plain").send("Invalid approval token");
+        return;
+      }
       const { request, passwordSetupToken } = await approveSignupRequest(req.params.id, approvalToken);
       await sendPasswordSetupEmail(request, passwordSetupToken);
+      res.setHeader("Cache-Control", "no-store");
       res.type("text/plain").send(`${request.email} approved. Password setup email sent.`);
     } catch (error) {
       if (error.code === "SIGNUP_REQUEST_NOT_FOUND") {
@@ -846,14 +1006,14 @@ function createApp(options = {}) {
       sendApiError(req, res, 404, "not_found", "Not found");
       return;
     }
-    console.error(
-      JSON.stringify({
+    logger.error(
+      {
         level: "error",
         requestId: req.requestId,
         route: req.originalUrl,
         code: error.code || "internal_error",
         errorType: error.name || "Error",
-      }),
+      },
     );
     sendApiError(req, res, 500, "internal_error", "Internal server error");
   });
@@ -879,6 +1039,7 @@ async function start() {
     console.error(`Failed to start server on ${host}:${port}: ${error.message}`);
     process.exit(1);
   });
+  installGracefulShutdown(server);
   return server;
 }
 
@@ -895,8 +1056,10 @@ if (require.main === module) {
 
 module.exports = {
   createApp,
+  defaultReadinessChecks,
   getBrainProvider,
   start,
+  readinessReport,
   validateApprovalModeConfig,
   validateServerConfig,
 };
