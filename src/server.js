@@ -13,18 +13,19 @@ const {
   getDialogueRenderTimeoutMs,
   isDialogueLlmRenderEnabled,
 } = require("./brain");
+const { getOpenClawStats, getOpenClawTimeoutMs } = require("./openclawGateway");
 const { scoreTranscript } = require("./scoring");
 const { deleteSkillMemory, getDueDrills, updateSkillMemory } = require("./skillMemory");
-const { generateGauntletPlan, scoreGauntletAnswer, scoreHardNoCleanExit, summarizeGauntlet } = require("./gauntlet");
+const { generateGauntletPlan, responseFingerprint, responseTokenHashes, scoreHardNoCleanExit, scoreSituationAttempt, summarizeGauntlet } = require("./gauntlet");
 const { buildReviewQueue, buildSkillTrends } = require("./reviewQueue");
 const { findApprovedResponse, findApprovedResponseForDrill } = require("./approvedResponses");
-const { buildCoachingSuggestion, HELP_MOVES, inferStage } = require("./objectionPlaybook");
+const { buildCoachingSuggestion, getObjectionById, HELP_MOVES, inferStage } = require("./objectionPlaybook");
 const { deleteProfile, loadProfile, saveProfile } = require("./profileStore");
 const {
   approveSignupRequest,
   buildPasswordSetupUrl,
   buildVerificationUrl,
-  consumeSignupRequest,
+  completePasswordSetup,
   createSignupRequest,
   notifyVerifiedSignupRequest,
   validatePasswordSetupToken,
@@ -34,17 +35,29 @@ const {
 const {
   LOCAL_USER,
   checkPocketBaseHealth,
+  checkPocketBaseProvisioner,
   loginWithPocketBase,
+  provisionApprovedUserWithPocketBase,
   resolveRequestUser,
   signupWithPocketBase,
   verifyPocketBaseToken,
 } = require("./auth");
 const { sendEmail } = require("./email");
 const { installGracefulShutdown } = require("./shutdown");
-const { loadMethodPack } = require("./methodPack");
+const {
+  listMethodPacks,
+  loadMethodPack,
+  resolveMethodPack,
+} = require("./methodPack");
+const { applyMethodCoaching } = require("./methodCoaching");
 const { createFixedWindowRateLimiter } = require("./rateLimit");
 const { runRetention } = require("./retention");
 const { checkOpenClawGateway } = require("./openclawGateway");
+const {
+  assessMethodReadiness,
+  buildFullCallResults,
+  buildReadinessCallResults,
+} = require("./evalHarness");
 
 function getBrainProvider() {
   if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
@@ -69,7 +82,11 @@ function validateServerConfig({ host = process.env.HOST || "127.0.0.1" } = {}) {
   }
 }
 
-function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = {}) {
+function validateApprovalModeConfig({
+  signupMode,
+  hasInjectedMailer = false,
+  hasInjectedNotifier = false,
+} = {}) {
   if (signupMode !== "approval") return;
   const missing = [];
   if (!process.env.PUBLIC_BASE_URL) missing.push("PUBLIC_BASE_URL");
@@ -79,6 +96,20 @@ function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = 
       missing.push("SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY");
     }
     if (!process.env.MAIL_FROM && !process.env.SMTP_FROM) missing.push("MAIL_FROM or SMTP_FROM");
+  }
+  if (!hasInjectedNotifier) {
+    const approvalEmail = String(process.env.SIGNUP_APPROVAL_EMAIL || "").trim();
+    const hasTelegramBot = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+    const hasTelegramChat = Boolean(process.env.TELEGRAM_CHAT_ID);
+    const hasTelegram = hasTelegramBot && hasTelegramChat;
+    if (hasTelegramBot !== hasTelegramChat) {
+      missing.push("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured together");
+    }
+    if (!approvalEmail && !hasTelegram) {
+      missing.push("SIGNUP_APPROVAL_EMAIL or both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID");
+    } else if (approvalEmail && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(approvalEmail)) {
+      missing.push("SIGNUP_APPROVAL_EMAIL must be a valid email address");
+    }
   }
   if (missing.length) {
     const error = new Error(`Approval-mode signup is missing required config: ${missing.join(", ")}`);
@@ -129,6 +160,11 @@ function validateProductionConfig({ env = process.env } = {}) {
   if ((env.SIGNUP_MODE || "disabled") === "open" && env.ALLOW_PUBLIC_SIGNUP !== "1") {
     errors.push("open signup requires ALLOW_PUBLIC_SIGNUP=1");
   }
+  if ((env.SIGNUP_MODE || "disabled") === "approval") {
+    if (String(env.POCKETBASE_PROVISIONING_SECRET || "").length < 32) {
+      errors.push("POCKETBASE_PROVISIONING_SECRET must be at least 32 characters");
+    }
+  }
   if (env.OPENCLAW_GATEWAY_URL) {
     if (!env.OPENCLAW_GATEWAY_TOKEN) errors.push("OPENCLAW_GATEWAY_TOKEN is required");
     if (env.OPENCLAW_AGENT_ID !== "sales-trainer-customer") {
@@ -136,6 +172,14 @@ function validateProductionConfig({ env = process.env } = {}) {
     }
     if (env.OPENCLAW_DATA_POLICY_ACK !== "1") {
       errors.push("OPENCLAW_DATA_POLICY_ACK must be 1");
+    }
+    if (
+      env.OPENCLAW_GATEWAY_TIMEOUT_MS !== undefined &&
+      (!Number.isInteger(Number(env.OPENCLAW_GATEWAY_TIMEOUT_MS)) ||
+        Number(env.OPENCLAW_GATEWAY_TIMEOUT_MS) <= 0 ||
+        Number(env.OPENCLAW_GATEWAY_TIMEOUT_MS) > 40000)
+    ) {
+      errors.push("OPENCLAW_GATEWAY_TIMEOUT_MS must be a positive integer no greater than 40000");
     }
   }
   if (errors.length) throw new Error(`Production config invalid: ${errors.join("; ")}`);
@@ -211,6 +255,9 @@ function defaultReadinessChecks({ authRequired }) {
     ...(authRequired
       ? [{ name: "auth", required: true, check: checkPocketBaseHealth }]
       : []),
+    ...(process.env.SIGNUP_MODE === "approval"
+      ? [{ name: "approved_user_provisioning", required: true, check: checkPocketBaseProvisioner }]
+      : []),
     ...(process.env.OPENCLAW_GATEWAY_URL
       ? [{ name: "openclaw", required: true, check: checkOpenClawGateway }]
       : []),
@@ -245,16 +292,19 @@ function createApp(options = {}) {
   const authClient = options.authClient || {
     login: loginWithPocketBase,
     signup: signupWithPocketBase,
+    provisionApprovedUser: provisionApprovedUserWithPocketBase,
   };
   validateApprovalModeConfig({
     signupMode,
     hasInjectedMailer: Boolean(options.signupRequestMailer),
+    hasInjectedNotifier: Boolean(options.verifiedSignupNotifier),
   });
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
-  const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
   const customerReplyRenderProvider = options.customerReplyRenderProvider;
   const methodPack = options.methodPack || loadMethodPack();
   const logger = options.logger || defaultLogger();
+  const verifiedSignupNotifier = options.verifiedSignupNotifier
+    || ((request) => notifyVerifiedSignupRequest(request, { mailer: signupRequestMailer, logger }));
   const startedAt = Date.now();
   const runtimeRequests = { total: 0, byStatus: {} };
   const readinessChecks = options.readinessChecks || defaultReadinessChecks({ authRequired });
@@ -323,6 +373,11 @@ function createApp(options = {}) {
         maxConcurrentPerUser: getDialogueRenderMaxConcurrentPerUser(),
         maxConcurrentGlobal: getDialogueRenderMaxConcurrentGlobal(),
         stats: getDialogueRenderStats(),
+      },
+      openClaw: {
+        enabled: Boolean(process.env.OPENCLAW_GATEWAY_URL),
+        timeoutMs: getOpenClawTimeoutMs(),
+        stats: getOpenClawStats(),
       },
       auth: {
         required: authRequired,
@@ -501,13 +556,29 @@ function createApp(options = {}) {
   app.get("/api/signup-requests/:id/verify", async (req, res, next) => {
     try {
       const request = await verifySignupEmail(req.params.id, String(req.query.token || ""));
-      await verifiedSignupNotifier(request);
+      let notificationDelayed = false;
+      try {
+        const result = await verifiedSignupNotifier(request);
+        notificationDelayed = !result?.sent;
+      } catch (error) {
+        notificationDelayed = true;
+        logger.error({
+          event: "signup_approval_notification_failed",
+          requestId: request.id,
+          code: error.code || "SIGNUP_APPROVAL_NOTIFICATION_FAILED",
+          recoveryCommand: "npm run signup:resend-approval -- --email <applicant-email>",
+        });
+      }
+      res.setHeader("Cache-Control", "no-store");
       res.type("text/html").send([
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
         "<title>Email verified</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>",
         "<body><section class=\"auth-gate\"><div class=\"auth-card\"><h1>Email verified</h1>",
         "<p>Your email is verified. An admin will review the request and email you a password setup link after approval.</p>",
+        notificationDelayed
+          ? "<p>The admin notification is delayed, but your request is safely recorded.</p>"
+          : "",
         "</div></section></body></html>",
       ].join(""));
     } catch (error) {
@@ -581,7 +652,21 @@ function createApp(options = {}) {
         return;
       }
       const { request, passwordSetupToken } = await approveSignupRequest(req.params.id, approvalToken);
-      await sendPasswordSetupEmail(request, passwordSetupToken);
+      try {
+        await sendPasswordSetupEmail(request, passwordSetupToken);
+      } catch (error) {
+        logger.error({
+          event: "signup_password_email_failed",
+          requestId: request.id,
+          code: error.code || "EMAIL_DELIVERY_FAILED",
+          recoveryCommand: "npm run signup:resend-password -- --email <applicant-email>",
+        });
+        res.setHeader("Cache-Control", "no-store");
+        res.status(503).type("text/plain").send(
+          "Account approved, but the password setup email was not sent. Run the password-email recovery command.",
+        );
+        return;
+      }
       res.setHeader("Cache-Control", "no-store");
       res.type("text/plain").send(`${request.email} approved. Password setup email sent.`);
     } catch (error) {
@@ -625,14 +710,34 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "password_too_short", "Password must be at least 8 characters");
         return;
       }
-      const request = await validatePasswordSetupToken(req.params.id, token);
-      if (enforceAuthRateLimit(req, res, request.email)) {
+      if (password.length > 256) {
+        sendApiError(req, res, 400, "password_too_long", "Password must be no more than 256 characters");
+        return;
+      }
+      const preflightRequest = await validatePasswordSetupToken(req.params.id, token);
+      if (enforceAuthRateLimit(req, res, preflightRequest.email)) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
-      const auth = await authClient.signup({ email: request.email, password, name: request.name });
-      authRateLimiter.reset(authRateLimitKey(req, request.email));
-      await consumeSignupRequest(request.id);
+      const completed = await completePasswordSetup(
+        req.params.id,
+        token,
+        async (request) => authClient.provisionApprovedUser({
+            email: request.email,
+            password,
+            name: request.name,
+          }),
+      );
+      authRateLimiter.reset(authRateLimitKey(req, completed.request.email));
+      let auth;
+      try {
+        auth = await authClient.login({ email: completed.request.email, password });
+      } catch {
+        const error = new Error("Approved account login unavailable after password setup");
+        error.code = "APPROVED_USER_LOGIN_UNAVAILABLE";
+        error.status = 503;
+        throw error;
+      }
       res.status(201).json(auth);
     } catch (error) {
       if (error.code === "SIGNUP_REQUEST_NOT_APPROVED") {
@@ -647,7 +752,40 @@ function createApp(options = {}) {
         sendApiError(req, res, 403, "signup_password_token_expired", "Password setup token expired");
         return;
       }
-      error.code = error.status && error.status < 500 ? "AUTH_INVALID" : error.code;
+      if (error.code === "SIGNUP_PASSWORD_SETUP_IN_PROGRESS") {
+        sendApiError(
+          req,
+          res,
+          409,
+          "signup_password_setup_in_progress",
+          "This password setup link has already been submitted. Try logging in with the password you chose.",
+        );
+        return;
+      }
+      if (error.code === "SIGNUP_REQUESTS_LOCK_TIMEOUT") {
+        sendApiError(req, res, 503, "signup_setup_busy", "Account setup is busy. Please try again.");
+        return;
+      }
+      if (error.code === "APPROVED_USER_LOGIN_UNAVAILABLE") {
+        sendApiError(
+          req,
+          res,
+          503,
+          "approved_user_login_unavailable",
+          "Your password was set, but automatic login failed. Return to login and use the password you chose.",
+        );
+        return;
+      }
+      if (error.status === 503 || error.code === "POCKETBASE_PROVISIONING_CONFIG_INVALID") {
+        sendApiError(
+          req,
+          res,
+          503,
+          "approved_user_provisioning_unavailable",
+          "Approved account setup is temporarily unavailable.",
+        );
+        return;
+      }
       next(error);
     }
   });
@@ -663,6 +801,90 @@ function createApp(options = {}) {
 
   app.get("/api/auth/me", (req, res) => {
     res.json({ user: req.user || LOCAL_USER, authRequired });
+  });
+
+  function methodPackForProfile(profile) {
+    if (profile.coachingMethodId === methodPack.manifest.id) return methodPack;
+    return loadMethodPack(profile.coachingMethodId);
+  }
+
+  function resolveSessionMethodPack(session) {
+    if (!session.methodPack) {
+      session.methodPack = {
+        id: methodPack.manifest.id,
+        version: methodPack.manifest.version,
+      };
+      session.methodMigration = "legacy_default";
+      return methodPack;
+    }
+    if (
+      session.methodPack.id === methodPack.manifest.id
+      && session.methodPack.version === methodPack.manifest.version
+    ) {
+      return methodPack;
+    }
+    return resolveMethodPack(session.methodPack);
+  }
+
+  function coachingProfileForSession(session) {
+    return session.coachingProfile || {
+      repName: "the rep",
+      companyName: "their company",
+    };
+  }
+
+  async function attachReadiness(session, sessionMethodPack) {
+    const existing = await listSessions(session.repId || "local");
+    const sessions = [...existing.filter((item) => item.id !== session.id), session];
+    const callResults = buildReadinessCallResults(sessions, sessionMethodPack);
+    const fullCallResults = buildFullCallResults(sessions, sessionMethodPack);
+    session.evaluation.readiness = assessMethodReadiness({
+      methodPack: session.methodPack,
+      callResults,
+      fullCallResults,
+      minimumRealisticCallScore: 70,
+      minimumCallsPerFamily: 3,
+      minimumPassingRate: 0.8,
+    });
+    return session.evaluation.readiness;
+  }
+
+  app.get("/api/methods", (_req, res) => {
+    const methods = listMethodPacks();
+    if (!methods.some((item) => item.id === methodPack.manifest.id && item.version === methodPack.manifest.version)) {
+      methods.push({
+        id: methodPack.manifest.id,
+        version: methodPack.manifest.version,
+        displayName: methodPack.manifest.displayName,
+        status: methodPack.manifest.status,
+      });
+    }
+    res.json({ methods });
+  });
+
+  app.get("/api/readiness", async (req, res, next) => {
+    try {
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const sessions = await listSessions(req.user.id);
+      const callResults = buildReadinessCallResults(sessions, selectedMethodPack);
+      const fullCallResults = buildFullCallResults(sessions, selectedMethodPack);
+      res.json({
+        readiness: assessMethodReadiness({
+          methodPack: {
+            id: selectedMethodPack.manifest.id,
+            version: selectedMethodPack.manifest.version,
+          },
+          callResults,
+          fullCallResults,
+          minimumRealisticCallScore: 70,
+          minimumCallsPerFamily: 3,
+          minimumPassingRate: 0.8,
+        }),
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.delete("/api/account-data", async (req, res, next) => {
@@ -730,7 +952,12 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "invalid_now", "Bad request");
         return;
       }
-      const drills = await getDueDrills(now, req.user.id);
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const drills = await getDueDrills(now, req.user.id, {
+        id: selectedMethodPack.manifest.id,
+        version: selectedMethodPack.manifest.version,
+      });
       res.json({ drills });
     } catch (error) {
       next(error);
@@ -740,9 +967,15 @@ function createApp(options = {}) {
   app.get("/api/review-queue", async (_req, res, next) => {
     try {
       const sessions = await listSessions(_req.user.id);
+      const profile = await loadProfile(_req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const pin = {
+        id: selectedMethodPack.manifest.id,
+        version: selectedMethodPack.manifest.version,
+      };
       res.json({
-        queue: buildReviewQueue(sessions),
-        skillTrends: buildSkillTrends(sessions),
+        queue: buildReviewQueue(sessions, pin),
+        skillTrends: buildSkillTrends(sessions, pin),
       });
     } catch (error) {
       next(error);
@@ -752,14 +985,20 @@ function createApp(options = {}) {
   app.post("/api/sessions", async (req, res, next) => {
     try {
       const scenario = getScenario(req.body.scenarioId);
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
       const now = new Date().toISOString();
       const session = {
         id: crypto.randomUUID(),
         repId: req.user.id,
         scenarioId: scenario.id,
         methodPack: {
-          id: methodPack.manifest.id,
-          version: methodPack.manifest.version,
+          id: selectedMethodPack.manifest.id,
+          version: selectedMethodPack.manifest.version,
+        },
+        coachingProfile: {
+          repName: profile.repName,
+          companyName: profile.companyName,
         },
         status: "active",
         startedAt: now,
@@ -791,9 +1030,15 @@ function createApp(options = {}) {
   app.post("/api/gauntlets", async (req, res, next) => {
     try {
       const scenario = getScenario(req.body.scenarioId || "enterprise-commercial-solar");
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const rounds = Number(req.body.rounds || 5);
+      const priorSessions = await listSessions(req.user.id);
+      const priorGauntletCount = priorSessions.filter((item) => item.gauntlet).length;
       const plan = generateGauntletPlan({
-        rounds: Number(req.body.rounds || 5),
+        rounds,
         playbookId: scenario.objectionPlaybookId,
+        startIndex: priorGauntletCount * rounds,
       });
       const now = new Date().toISOString();
       const firstRound = plan.rounds[0];
@@ -802,8 +1047,12 @@ function createApp(options = {}) {
         repId: req.user.id,
         scenarioId: scenario.id,
         methodPack: {
-          id: methodPack.manifest.id,
-          version: methodPack.manifest.version,
+          id: selectedMethodPack.manifest.id,
+          version: selectedMethodPack.manifest.version,
+        },
+        coachingProfile: {
+          repName: profile.repName,
+          companyName: profile.companyName,
         },
         status: "active",
         startedAt: now,
@@ -891,6 +1140,7 @@ function createApp(options = {}) {
         dialogue: reply.dialogue,
         warning: reply.warning,
         warningCode: reply.warningCode,
+        providerLatencyMs: reply.providerLatencyMs,
         at: new Date().toISOString(),
       };
       session.turns.push(customerTurn);
@@ -926,6 +1176,7 @@ function createApp(options = {}) {
         sendApiError(req, res, 409, "session_not_active", "Session is not active");
         return;
       }
+      const sessionMethodPack = resolveSessionMethodPack(session);
 
       const now = new Date().toISOString();
       const round = session.gauntlet.plan.rounds[session.gauntlet.currentRound];
@@ -935,7 +1186,10 @@ function createApp(options = {}) {
         objectionId: round.objectionId,
         objectionType: round.type,
         nearMissFamily: round.nearMissFamily,
-        score: scoreGauntletAnswer(text),
+        situationFamily: round.situationFamily,
+        score: scoreSituationAttempt(text, getObjectionById(round.objectionId), sessionMethodPack),
+        responseFingerprint: responseFingerprint(text),
+        responseTokenHashes: responseTokenHashes(text),
       };
       if (round.type === "hard_no") {
         result.hardNoCleanExit = scoreHardNoCleanExit(text);
@@ -959,6 +1213,20 @@ function createApp(options = {}) {
         session.status = "ended";
         session.endedAt = now;
         session.gauntlet.summary = summarizeGauntlet(session.gauntlet.results);
+        session.evaluation = scoreTranscript({
+          scenario: getScenario(session.scenarioId),
+          turns: session.turns,
+          helpAttempts: session.helpAttempts || [],
+          methodPack: sessionMethodPack,
+        });
+        session.methodDrill = session.evaluation.methodEvaluation.assignedDrill;
+        session.assignedDrill = session.evaluation.assignedDrill;
+        session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill, {
+          methodPack: sessionMethodPack,
+          profile: coachingProfileForSession(session),
+        });
+        await attachReadiness(session, sessionMethodPack);
+        await updateSkillMemory({ session, evaluation: session.evaluation });
       }
 
       await saveSession(session);
@@ -971,17 +1239,22 @@ function createApp(options = {}) {
   app.post("/api/sessions/:id/end", async (req, res, next) => {
     try {
       const session = await loadOwnedSession(req, req.params.id);
+      const sessionMethodPack = resolveSessionMethodPack(session);
       session.status = "ended";
       session.endedAt = new Date().toISOString();
       session.evaluation = scoreTranscript({
         scenario: getScenario(session.scenarioId),
         turns: session.turns,
         helpAttempts: session.helpAttempts || [],
-        methodPack,
+        methodPack: sessionMethodPack,
       });
       session.methodDrill = session.evaluation.methodEvaluation.assignedDrill;
       session.assignedDrill = session.evaluation.assignedDrill;
-      session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill);
+      session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill, {
+        methodPack: sessionMethodPack,
+        profile: coachingProfileForSession(session),
+      });
+      await attachReadiness(session, sessionMethodPack);
       await updateSkillMemory({ session, evaluation: session.evaluation });
       await saveSession(session);
       res.json({ session });
@@ -993,8 +1266,13 @@ function createApp(options = {}) {
   app.post("/api/sessions/:id/coach", async (req, res, next) => {
     try {
       const session = await loadOwnedSession(req, req.params.id);
+      const sessionMethodPack = resolveSessionMethodPack(session);
       const scenario = getScenario(session.scenarioId);
-      const suggestion = buildCoachingSuggestion({ scenario, session });
+      const suggestion = applyMethodCoaching({
+        suggestion: buildCoachingSuggestion({ scenario, session }),
+        methodPack: sessionMethodPack,
+        profile: coachingProfileForSession(session),
+      });
       const selectedMove = String(req.body.selectedMove || "").trim();
       if (!selectedMove) {
         res.json({
@@ -1006,6 +1284,7 @@ function createApp(options = {}) {
             prompt: "Choose your move before seeing the coaching suggestion.",
             moves: HELP_MOVES,
             suggestionHidden: true,
+            methodMetadata: suggestion.methodMetadata,
           },
         });
         return;
@@ -1031,6 +1310,8 @@ function createApp(options = {}) {
           approvedExample: findApprovedResponse({
             objectionId: suggestion.objectionId,
             recommendedMove: suggestion.recommendedMove,
+            methodPack: sessionMethodPack,
+            profile: coachingProfileForSession(session),
           }),
           suggestionHidden: false,
         },
@@ -1109,11 +1390,13 @@ function createApp(options = {}) {
     }
   });
 
-  app.post("/api/score", (req, res, next) => {
+  app.post("/api/score", async (req, res, next) => {
     try {
       const scenario = getScenario(req.body.scenarioId);
       const turns = Array.isArray(req.body.turns) ? req.body.turns : [];
-      res.json({ evaluation: scoreTranscript({ scenario, turns, methodPack }) });
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      res.json({ evaluation: scoreTranscript({ scenario, turns, methodPack: selectedMethodPack }) });
     } catch (error) {
       next(error);
     }
@@ -1150,11 +1433,19 @@ function createApp(options = {}) {
       sendApiError(req, res, 409, "session_conflict", "Session changed; reload and try again");
       return;
     }
+    if (error.code === "INVALID_COACHING_METHOD") {
+      sendApiError(req, res, 400, "invalid_coaching_method", "Unknown coaching method");
+      return;
+    }
+    if (error.code === "METHOD_UNAVAILABLE") {
+      sendApiError(req, res, 409, "method_unavailable", "The coaching method for this session is unavailable.");
+      return;
+    }
     logger.error(
       {
         level: "error",
         requestId: req.requestId,
-        route: req.originalUrl,
+        route: req.path,
         code: error.code || "internal_error",
         errorType: error.name || "Error",
       },

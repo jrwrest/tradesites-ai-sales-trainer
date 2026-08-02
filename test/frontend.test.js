@@ -61,3 +61,74 @@ test("score card prioritizes the source-grounded method drill and confidence", a
   assert.match(renderScore, /criticalGates/);
   assert.match(renderScore, /drill\?\.behaviorId/);
 });
+
+test("Profile loads the method registry and submits a coaching method selector", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const renderProfile = appJs.slice(
+    appJs.indexOf("function renderProfile("),
+    appJs.indexOf("function updateTimer()"),
+  );
+
+  assert.match(appJs, /api\("\/api\/methods"\)/);
+  assert.match(renderProfile, /coachingMethodId/);
+  assert.match(renderProfile, /Coaching method/);
+  assert.match(renderProfile, /document\.createElement\("select"\)/);
+});
+
+test("Profile save is single-flight and keeps accessible inline feedback in the existing form", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const renderProfile = appJs.slice(
+    appJs.indexOf("function renderProfile("),
+    appJs.indexOf("function updateTimer()"),
+  );
+  const submitHandler = renderProfile.slice(renderProfile.indexOf('form.addEventListener("submit"'));
+  const dataIndex = submitHandler.indexOf("new FormData(form)");
+  const disabledIndex = submitHandler.indexOf("button.disabled = true");
+  const savingIndex = submitHandler.indexOf('button.textContent = "Saving..."');
+  const apiIndex = submitHandler.indexOf('await api("/api/profile"');
+  const savedIndex = submitHandler.indexOf('profileSaveStatus.textContent = "Profile saved."');
+
+  assert.match(renderProfile, /className = "profile-save-status"/);
+  assert.match(renderProfile, /setAttribute\("role", "status"\)/);
+  assert.match(renderProfile, /setAttribute\("aria-live", "polite"\)/);
+  assert.match(renderProfile, /setAttribute\("aria-atomic", "true"\)/);
+  assert.match(submitHandler, /if \(button\.disabled\) return/);
+  assert.ok(dataIndex !== -1 && dataIndex < disabledIndex);
+  assert.ok(disabledIndex !== -1 && disabledIndex < apiIndex);
+  assert.ok(savingIndex !== -1 && savingIndex < apiIndex);
+  assert.ok(apiIndex !== -1 && apiIndex < savedIndex);
+  assert.doesNotMatch(submitHandler, /renderProfile\(payload\.profile\)/);
+  assert.match(submitHandler, /control\.disabled = true/);
+  assert.match(submitHandler, /control\.disabled = false/);
+  assert.match(submitHandler, /confirmation\.disabled = true/);
+  assert.match(submitHandler, /deleteButton\.disabled = true/);
+  assert.match(submitHandler, /form\.removeAttribute\("aria-busy"\)/);
+  assert.match(renderProfile, /profileSaveStatus\.textContent = "Unsaved changes\."/);
+  assert.match(submitHandler, /profileSaveStatus\.setAttribute\("role", "alert"\)/);
+  assert.match(renderProfile, /if \(state\.waiting\) return;[\s\S]*state\.waiting = true;[\s\S]*api\("\/api\/account-data"/);
+});
+
+test("completed gauntlets render the pinned method evaluation and drill", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const submitMessage = appJs.slice(
+    appJs.indexOf("async function submitMessage()"),
+    appJs.indexOf("async function endCall()"),
+  );
+
+  assert.match(submitMessage, /renderScore\(state\.session\.evaluation\)/);
+  assert.doesNotMatch(submitMessage, /recommendedDrill: `Repeat the gauntlet/);
+});
+
+test("score card explains supervised-live-call readiness and remaining gates", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const renderScore = appJs.slice(appJs.indexOf("function renderScore("), appJs.indexOf("function renderCoaching("));
+
+  assert.match(renderScore, /evaluation\.readiness/);
+  assert.match(renderScore, /Ready for a supervised live call/);
+  assert.match(renderScore, /Practice required/);
+  assert.match(renderScore, /scenario_family_coverage/);
+  assert.match(renderScore, /ethical_gates/);
+  assert.match(renderScore, /realistic_call_score_floor/);
+  assert.match(renderScore, /multi_call_consistency/);
+  assert.match(renderScore, /typed practice does not prove live vocal delivery/i);
+});

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "mode": "method_owned",
+  "allowedTemplateTokens": ["repName", "companyName"],
+  "frameworkByStage": {
+    "opener": "nepq_connecting",
+    "permission": "nepq_connecting",
+    "discovery": "nepq_awareness",
+    "qualification": "nepq_qualifying",
+    "commercial": "nepq_presentation",
+    "close": "nepq_commitment"
+  },
+  "frameworkByMove": {
+    "acknowledge": "nepq_objection_dialogue",
+    "ask_permission": "nepq_connecting",
+    "clarify": "nepq_objection_dialogue",
+    "qualify": "nepq_qualifying",
+    "route": "nepq_qualifying",
+    "commercial_explain": "nepq_presentation",
+    "exit": "nepq_objection_dialogue"
+  },
+  "techniques": {
+    "nepq_connecting": { "sourceRefs": ["connecting"], "prompt": "Lower resistance with a transparent reason, neutral language, and permission.", "guidance": ["Sound curious rather than certain.", "Make the reason for the call clear.", "Give the prospect a genuine easy out."], "template": "It is {repName} from {companyName}. I am not sure whether this would even be relevant for you. Would it be okay if I took 20 seconds to explain why I called, and you can tell me if it is worth continuing?" },
+    "nepq_awareness": { "sourceRefs": ["situation", "problem", "solution"], "prompt": "Use situation, problem-awareness, and solution-awareness questions so the prospect explains the gap.", "guidance": ["Ask one question at a time.", "Probe the prospect's exact words.", "Let them define what a better outcome would mean."], "template": "When you say that, how has that affected the way you are handling energy costs or the site at the moment?" },
+    "nepq_consequence": { "sourceRefs": ["consequence"], "prompt": "Explore the practical consequence of a problem the prospect has already acknowledged.", "guidance": ["Do not introduce fear.", "Keep the consequence tied to their facts.", "Let the prospect estimate the impact."], "template": "If that stayed the same through the next contract or budget cycle, what effect would that have, if any?" },
+    "nepq_qualifying": { "sourceRefs": ["qualifying"], "prompt": "Qualify desire, commercial means, timing, and the real decision path conversationally.", "guidance": ["Verify fit before commitment.", "Map everyone involved in the decision.", "Treat landlord and procurement routes as legitimate constraints."], "template": "If it did look commercially worthwhile, how would a decision like that normally be made, and who else would need to be involved?" },
+    "nepq_presentation": { "sourceRefs": ["presentation"], "prompt": "Ask permission, then connect a short explanation directly to the prospect's stated problem and desired outcome.", "guidance": ["Present only after sufficient diagnosis.", "Use the prospect's words.", "Avoid a generic solar or PPA feature dump."], "template": "Would it be appropriate to share how the funded route might address what you said, and then you can decide whether it is worth a deeper look?" },
+    "nepq_commitment": { "sourceRefs": ["commitment"], "prompt": "Use a conditional commitment question, uncover the prospect's reason, then agree a concrete calendar step.", "guidance": ["Stay detached from forcing yes.", "Let the prospect explain why the next step fits.", "Book the right stakeholders and purpose."], "template": "Do you feel this could possibly be worth looking at with the right people, or do you feel it would not be a fit?" },
+    "nepq_objection_dialogue": { "sourceRefs": ["objections"], "prompt": "Clarify the concern before responding; if it is a hard opt-out, acknowledge it and end immediately.", "guidance": ["Do not rebut the first surface statement.", "Ask what the concern means when continued dialogue is invited.", "Never ask another sales question after an explicit opt-out."], "exitTemplate": "I understand. I will remove your details and will not contact you again. Goodbye.", "template": "When you say that, what specifically concerns you most about it?" }
+  }
+}

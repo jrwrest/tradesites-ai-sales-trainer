@@ -50,6 +50,62 @@ test("scores normal transcript with expected fields", () => {
   );
 });
 
+test("commercial solar coaching never leaks lead-generation discovery advice", () => {
+  const solarScenario = getScenario("enterprise-commercial-solar");
+  const evaluation = scoreTranscript({
+    scenario: solarScenario,
+    turns: [
+      { role: "persona", text: solarScenario.persona.openingLine },
+      { role: "user", text: "James from BrightTrade Solar. Can I take 20 seconds?" },
+      { role: "persona", text: "What is this about?" },
+    ],
+  });
+
+  assert.equal(evaluation.missedOpportunities.some((item) => /lead flow|follow-up process/i.test(item)), false);
+  assert.equal(
+    evaluation.missedOpportunities.some((item) => /energy|electricity|site|decision process/i.test(item)),
+    true,
+  );
+});
+
+test("site ownership question counts as commercial solar discovery", () => {
+  const solarScenario = getScenario("enterprise-commercial-solar");
+  const evaluation = scoreTranscript({
+    scenario: solarScenario,
+    turns: [
+      { role: "persona", text: solarScenario.persona.openingLine },
+      { role: "user", text: "Do you own the site or lease the building?" },
+      { role: "persona", text: "Some sites are owned and some leased." },
+    ],
+  });
+
+  assert.ok(evaluation.legacyCategories.discovery >= 7);
+  assert.equal(
+    evaluation.missedOpportunities.some((item) => /energy position|site control|decision process/i.test(item)),
+    false,
+  );
+});
+
+test("terminal hard-no coaching does not recommend unpacking or closing", () => {
+  const solarScenario = getScenario("enterprise-commercial-solar");
+  const evaluation = scoreTranscript({
+    scenario: solarScenario,
+    turns: [
+      { role: "user", text: "James from BrightTrade Solar. Can I take 20 seconds?" },
+      { role: "persona", text: "We have no requirement. Take us off your call list." },
+    ],
+  });
+
+  assert.equal(
+    evaluation.missedOpportunities.some((item) => /unpack objections|specific next step|energy position|site control/i.test(item)),
+    false,
+  );
+  assert.equal(
+    evaluation.missedOpportunities.some((item) => /hard no|end the call|exit cleanly/i.test(item)),
+    true,
+  );
+});
+
 test("post-call scoring includes help accuracy", () => {
   const evaluation = scoreTranscript({
     scenario: getScenario("enterprise-commercial-solar"),
@@ -84,7 +140,7 @@ test("scores the food distributor rejection example as a weak call", () => {
   assert.equal(evaluation.assignedDrill.skill, "hard_no_clean_exit");
   assert.ok(
     evaluation.missedOpportunities.some((item) =>
-      item.toLowerCase().includes("objection"),
+      /hard no|exit cleanly|contact request/i.test(item),
     ),
   );
 });

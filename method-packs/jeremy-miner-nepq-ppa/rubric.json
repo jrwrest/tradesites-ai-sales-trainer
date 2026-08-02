@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "scoreScale": [
+    { "score": 0, "label": "Not observed", "definition": "No transcript evidence; do not infer skill." },
+    { "score": 1, "label": "Harmful", "definition": "Pressure, assumption, or counter-evidence harms the conversation." },
+    { "score": 2, "label": "Attempted", "definition": "The behavior appears but is generic, mistimed, or incomplete." },
+    { "score": 3, "label": "Effective", "definition": "Clear evidence achieves the question or conversation objective." },
+    { "score": 4, "label": "Adaptive", "definition": "The behavior is neutral, concise, prospect-specific, and advances self-persuasion." }
+  ],
+  "stageWeights": [
+    { "stageId": "open", "weight": 10 },
+    { "stageId": "situation", "weight": 10 },
+    { "stageId": "problem", "weight": 18 },
+    { "stageId": "solution", "weight": 10 },
+    { "stageId": "consequence", "weight": 12 },
+    { "stageId": "qualify", "weight": 15 },
+    { "stageId": "present", "weight": 10 },
+    { "stageId": "commitment", "weight": 8 },
+    { "stageId": "resolve", "weight": 7 }
+  ],
+  "criticalGates": [
+    { "id": "respect_hard_no", "label": "Respect an explicit hard no", "sourceRefs": ["objections"], "failEvidence": ["continues persuasion after an opt-out"], "effect": { "capOverallScore": 39, "requiredDrillBehaviorId": "nepq_hard_no_clean_exit" } },
+    { "id": "truthful_claims", "label": "Use truthful claims and evidence", "sourceRefs": ["connecting", "presentation"], "failEvidence": ["invented outcome, proof, or guarantee"], "effect": { "capOverallScore": 20, "requiredHumanReview": true } },
+    { "id": "respect_real_authority", "label": "Respect the real decision path", "sourceRefs": ["qualifying"], "failEvidence": ["pressures a contact to bypass a stakeholder"], "effect": { "capOverallScore": 39, "requiredDrillBehaviorId": "nepq_decision_path" } },
+    { "id": "fit_before_commitment", "label": "Verify fit before commitment", "sourceRefs": ["qualifying", "commitment"], "failEvidence": ["asks for commitment after material no-fit evidence"], "effect": { "capOverallScore": 20, "requiredHumanReview": true } }
+  ],
+  "confidence": {
+    "minimumRepTurnsPerStage": 1,
+    "high": "direct evidence appears in multiple relevant turns",
+    "medium": "direct evidence appears in one relevant turn",
+    "low": "behavior is absent, ambiguous, or not reached",
+    "rule": "Unobserved behavior scores zero; readiness requires stage breadth over repeated calls."
+  }
+}

@@ -8,6 +8,11 @@ function mailFrom() {
   return process.env.SMTP_FROM || "";
 }
 
+function emailDeliveryTimeoutMs() {
+  const value = Number(process.env.EMAIL_DELIVERY_TIMEOUT_MS || 10000);
+  return Number.isFinite(value) && value > 0 ? value : 10000;
+}
+
 function validateEmailConfig() {
   const smtpHost = process.env.SMTP_HOST;
   const brevoApiKey = process.env.BREVO_API_KEY;
@@ -42,12 +47,22 @@ function validateEmailConfig() {
 async function sendEmail(message, { fetchImpl = fetch } = {}) {
   const { provider, apiKey, from: configuredFrom } = validateEmailConfig();
   const from = message.from || configuredFrom;
-  if (provider === "smtp") return sendSmtpEmail({ ...message, from });
-  if (provider === "brevo") return sendBrevoEmail({ ...message, from }, { apiKey, fetchImpl });
-  return sendResendEmail({ ...message, from }, { apiKey, fetchImpl });
+  try {
+    if (provider === "smtp") return await sendSmtpEmail({ ...message, from });
+    if (provider === "brevo") {
+      return await sendBrevoEmail({ ...message, from }, { apiKey, fetchImpl });
+    }
+    return await sendResendEmail({ ...message, from }, { apiKey, fetchImpl });
+  } catch (error) {
+    if (error.code === "EMAIL_DELIVERY_FAILED") throw error;
+    const deliveryError = new Error("Email delivery failed");
+    deliveryError.code = "EMAIL_DELIVERY_FAILED";
+    throw deliveryError;
+  }
 }
 
 async function sendSmtpEmail(message) {
+  const timeoutMs = emailDeliveryTimeoutMs();
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
@@ -56,6 +71,9 @@ async function sendSmtpEmail(message) {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
   });
   try {
     const info = await transporter.sendMail({
@@ -89,6 +107,7 @@ async function sendBrevoEmail(message, { apiKey, fetchImpl }) {
       Accept: "application/json",
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(emailDeliveryTimeoutMs()),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -117,6 +136,7 @@ async function sendResendEmail(message, { apiKey, fetchImpl }) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(emailDeliveryTimeoutMs()),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {

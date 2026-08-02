@@ -1,5 +1,6 @@
 const state = {
   scenarios: [],
+  methods: [],
   scenario: null,
   session: null,
   recognition: null,
@@ -282,6 +283,44 @@ function renderScore(evaluation) {
   methodMeta.textContent = `Source-grounded method score · ${confidence} evidence confidence · pack ${packVersion}`;
   wrapper.append(methodMeta);
 
+  const readiness = evaluation.readiness;
+  if (readiness) {
+    const readinessBox = document.createElement("section");
+    readinessBox.className = `readiness ${readiness.ready ? "ready" : "practice"}`;
+    const readinessTitle = document.createElement("h3");
+    readinessTitle.textContent = readiness.ready
+      ? "Ready for a supervised live call"
+      : "Practice required";
+    const readinessSummary = document.createElement("p");
+    readinessSummary.textContent = `${readiness.evidenceCallCount} scored situation attempts for this method.`;
+    const checkLabels = {
+      scenario_family_coverage: "Situation coverage",
+      ethical_gates: "Ethical gates",
+      realistic_call_score_floor: "Call score floor",
+      multi_call_consistency: "Repeat-call consistency",
+      full_call_simulation: "Three complete call simulations",
+    };
+    const readinessList = document.createElement("ul");
+    readiness.checks.forEach((check) => {
+      const item = document.createElement("li");
+      const missing = check.missingFamilies?.length
+        ? ` — missing: ${check.missingFamilies.join(", ").replaceAll("_", " ")}`
+        : "";
+      const statusLabel = check.status === "pass"
+        ? "Passed"
+        : check.status === "review"
+          ? "Needs coach review"
+          : "Not passed";
+      item.textContent = `${statusLabel}: ${checkLabels[check.id] || check.id}${missing}`;
+      readinessList.append(item);
+    });
+    const readinessLimit = document.createElement("p");
+    readinessLimit.className = "muted";
+    readinessLimit.textContent = "Typed practice does not prove live vocal delivery; final sign-off needs a coach-reviewed or supervised call.";
+    readinessBox.append(readinessTitle, readinessSummary, readinessList, readinessLimit);
+    wrapper.append(readinessBox);
+  }
+
   Object.entries(evaluation.categories).forEach(([name, value]) => {
     const row = document.createElement("div");
     row.className = "score-row";
@@ -364,8 +403,17 @@ function renderCoaching(suggestion) {
   title.textContent = suggestion.title;
   const stage = document.createElement("p");
   stage.className = "muted";
-  stage.textContent = `Stage: ${suggestion.stage}`;
+  stage.textContent = suggestion.methodMetadata
+    ? `${suggestion.methodMetadata.frameworkLabel} · ${suggestion.methodMetadata.displayName}`
+    : `Stage: ${suggestion.stage}`;
   wrapper.append(title, stage);
+
+  if (suggestion.methodPrompt) {
+    const methodPrompt = document.createElement("p");
+    methodPrompt.className = "method-prompt";
+    methodPrompt.textContent = suggestion.methodPrompt;
+    wrapper.append(methodPrompt);
+  }
 
   if (suggestion.suggestionHidden) {
     const moves = document.createElement("div");
@@ -393,11 +441,23 @@ function renderCoaching(suggestion) {
   }
 
   const list = document.createElement("ul");
-  suggestion.suggestions.forEach((item) => {
+  const guidance = suggestion.methodGuidance || suggestion.suggestions || [];
+  guidance.forEach((item) => {
     const li = document.createElement("li");
     li.textContent = item;
     list.append(li);
   });
+  if (suggestion.situationGuidance?.length) {
+    const situationLabel = document.createElement("strong");
+    situationLabel.textContent = "Situation facts and constraints:";
+    const situationList = document.createElement("ul");
+    suggestion.situationGuidance.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      situationList.append(li);
+    });
+    wrapper.append(situationLabel, situationList);
+  }
   const tryThis = document.createElement("div");
   tryThis.className = "try-this";
   const tryLabel = document.createElement("strong");
@@ -514,23 +574,86 @@ function renderProfile(profile) {
   profileField(form, profile, "opener", "Default opener", true);
   profileField(form, profile, "notes", "Notes", true);
 
+  const methodField = document.createElement("label");
+  methodField.className = "profile-field";
+  const methodLabel = document.createElement("span");
+  methodLabel.textContent = "Coaching method";
+  const methodSelect = document.createElement("select");
+  methodSelect.name = "coachingMethodId";
+  methodSelect.setAttribute("aria-label", "Coaching method");
+  state.methods.forEach((method) => {
+    const option = document.createElement("option");
+    option.value = method.id;
+    option.textContent = method.displayName;
+    option.selected = method.id === profile.coachingMethodId;
+    methodSelect.append(option);
+  });
+  const methodHelp = document.createElement("small");
+  methodHelp.className = "muted";
+  methodHelp.textContent = "This choice controls live coaching, scoring, examples, and assigned drills. The Alex Hormozi option is an independent source-grounded adaptation.";
+  methodField.append(methodLabel, methodSelect, methodHelp);
+  form.append(methodField);
+
   const button = document.createElement("button");
   button.type = "submit";
   button.textContent = "Save Profile";
-  form.append(button);
+  const profileSaveStatus = document.createElement("p");
+  profileSaveStatus.className = "profile-save-status";
+  profileSaveStatus.setAttribute("role", "status");
+  profileSaveStatus.setAttribute("aria-live", "polite");
+  profileSaveStatus.setAttribute("aria-atomic", "true");
+  form.append(button, profileSaveStatus);
+
+  form.addEventListener("input", () => {
+    if (profileSaveStatus.textContent === "Profile saved.") {
+      profileSaveStatus.textContent = "Unsaved changes.";
+    }
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (button.disabled) return;
+
     const data = Object.fromEntries(new FormData(form).entries());
+    const controls = [...form.querySelectorAll("input, textarea, select")];
+    button.disabled = true;
+    button.textContent = "Saving...";
+    controls.forEach((control) => { control.disabled = true; });
+    confirmation.disabled = true;
+    deleteButton.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    profileSaveStatus.className = "profile-save-status";
+    profileSaveStatus.setAttribute("role", "status");
+    profileSaveStatus.textContent = "Saving profile...";
+    state.waiting = true;
+    setButtons();
     try {
       const payload = await api("/api/profile", {
         method: "PUT",
         body: JSON.stringify({ profile: data }),
       });
-      renderProfile(payload.profile);
+      controls.forEach((control) => {
+        if (Object.hasOwn(payload.profile, control.name)) {
+          control.value = payload.profile[control.name] || "";
+        }
+      });
+      profileSaveStatus.textContent = "Profile saved.";
       setStatus("Profile saved.");
     } catch (error) {
+      profileSaveStatus.className = "profile-save-status error";
+      profileSaveStatus.setAttribute("role", "alert");
+      profileSaveStatus.textContent = `Could not save profile: ${error.message}`;
       setStatus(error.message, true);
+    } finally {
+      controls.forEach((control) => { control.disabled = false; });
+      confirmation.disabled = false;
+      deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
+      button.disabled = false;
+      button.textContent = "Save Profile";
+      form.removeAttribute("aria-busy");
+      state.waiting = false;
+      setButtons();
+      button.focus();
     }
   });
 
@@ -552,6 +675,14 @@ function renderProfile(profile) {
     deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
   });
   deleteButton.addEventListener("click", async () => {
+    if (state.waiting) return;
+
+    const profileControls = [...form.querySelectorAll("input, textarea, select")];
+    state.waiting = true;
+    setButtons();
+    profileControls.forEach((control) => { control.disabled = true; });
+    button.disabled = true;
+    confirmation.disabled = true;
     deleteButton.disabled = true;
     try {
       await api("/api/account-data", {
@@ -563,6 +694,12 @@ function renderProfile(profile) {
       setStatus("Your saved training data was deleted.");
     } catch (error) {
       setStatus(error.message, true);
+    } finally {
+      state.waiting = false;
+      setButtons();
+      profileControls.forEach((control) => { control.disabled = false; });
+      button.disabled = false;
+      confirmation.disabled = false;
       deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
     }
   });
@@ -603,6 +740,15 @@ async function loadScenarios() {
   });
   state.scenario = state.scenarios[0];
   renderScenario();
+}
+
+async function loadMethods() {
+  if (!state.user) {
+    state.methods = [];
+    return;
+  }
+  const payload = await api("/api/methods");
+  state.methods = payload.methods || [];
 }
 
 async function loadHealth() {
@@ -653,7 +799,7 @@ async function authenticate() {
     storeAuth(payload.token, payload.user);
     elements.authPassword.value = "";
     setStatus(`Signed in as ${payload.user.name || payload.user.email}.`);
-    await loadDueDrill();
+    await Promise.all([loadMethods(), loadDueDrill()]);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -701,7 +847,7 @@ async function signup() {
     storeAuth(payload.token, payload.user);
     elements.authPassword.value = "";
     setStatus(`Account created for ${payload.user.name || payload.user.email}.`);
-    await loadDueDrill();
+    await Promise.all([loadMethods(), loadDueDrill()]);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -875,6 +1021,7 @@ async function requestProfile() {
   state.waiting = true;
   setButtons();
   try {
+    if (!state.methods.length) await loadMethods();
     const payload = await api("/api/profile");
     renderProfile(payload.profile);
     setStatus("Profile loaded.");
@@ -907,18 +1054,7 @@ async function submitMessage() {
       if (state.session.status === "ended") {
         clearInterval(state.timerId);
         const summary = state.session.gauntlet.summary;
-        const average = Math.round(
-          state.session.gauntlet.results.reduce((total, item) => total + item.score, 0) /
-            state.session.gauntlet.results.length,
-        );
-        renderScore({
-          overallScore: average,
-          categories: Object.fromEntries(
-            summary.familyScores.map((item) => [item.family, Math.round(item.average)]),
-          ),
-          recommendedDrill: `Repeat the gauntlet and focus on ${summary.weakestFamily}.`,
-          missedOpportunities: [],
-        });
+        renderScore(state.session.evaluation);
         setStatus(`Gauntlet complete. Weakest family: ${summary.weakestFamily}.`);
         return;
       }
@@ -1012,6 +1148,7 @@ setupSpeech();
 loadHealth()
   .then(loadScenarios)
   .then(loadAuth)
+  .then(loadMethods)
   .then(loadDueDrill)
   .then(setButtons)
   .catch((error) => setStatus(error.message, true));

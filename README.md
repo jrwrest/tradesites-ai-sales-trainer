@@ -30,6 +30,7 @@ The public demo requires login. For self-hosted public deployments, disable open
 - Versioned, source-grounded PPP, BANT, CLOSER, three-pillar, and AAA evaluation with turn-level evidence and ethical gates.
 - Objection gauntlet mode for repeated high-pressure practice.
 - Local review queue and approved response examples.
+- Per-user, version-pinned coaching method selection; the bundled source-grounded Hormozi adaptation controls coaching, scoring, examples, and drills.
 - Pluggable customer brain: deterministic mock, OpenClaw gateway, or local command provider.
 - Local-first data storage with ignored transcript/profile/session files.
 
@@ -57,7 +58,7 @@ Chrome is the best browser for mic input because Web Speech API support varies b
 The trainer requires login by default. For per-rep accounts, run PocketBase on loopback:
 
 ```bash
-./pocketbase serve --http 127.0.0.1:8090
+./pocketbase serve --http 127.0.0.1:8090 --hooksDir ./pb_hooks
 ```
 
 Then start the trainer in another terminal:
@@ -80,8 +81,8 @@ To let visitors request access without creating accounts immediately, use approv
 SIGNUP_MODE=approval \
 PUBLIC_BASE_URL="https://trainer.example.com" \
 ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
-TELEGRAM_BOT_TOKEN="replace-with-your-bot-token" \
-TELEGRAM_CHAT_ID="replace-with-your-chat-id" \
+POCKETBASE_PROVISIONING_SECRET="replace-with-at-least-32-random-characters" \
+SIGNUP_APPROVAL_EMAIL="owner@example.com" \
 SMTP_HOST="smtp-relay.brevo.com" \
 SMTP_PORT="587" \
 SMTP_USER="replace-with-your-brevo-smtp-user" \
@@ -92,7 +93,33 @@ POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
 ```
 
-In approval mode, visitors enter only their email and click `Create Account`. The app sends a verification email. After the visitor verifies their email, Telegram receives an approval link. When you approve it, the app emails the visitor a password setup link. They set a password, then log in with email and password.
+Start PocketBase with the repository's narrow approval hook and the same secret:
+
+```bash
+POCKETBASE_PROVISIONING_SECRET="replace-with-at-least-32-random-characters" \
+./pocketbase serve --http 127.0.0.1:8090 --hooksDir ./pb_hooks
+```
+
+In approval mode, visitors enter only their email and click `Create Account`. The app sends a verification email. After the visitor verifies their email, `SIGNUP_APPROVAL_EMAIL` receives an approval link. When you approve it, the app emails the visitor a password setup link. They set a password, then log in with email and password. Telegram remains an optional fallback when both Telegram values are configured. Removing `SIGNUP_APPROVAL_EMAIL` restores Telegram-only notifications only when both Telegram values are present; no data rollback is required.
+
+To rotate and resend a fresh admin approval link for an already-verified request without printing the link or token:
+
+```bash
+npm run signup:resend-approval -- --email applicant@example.com
+```
+
+If approval succeeded but the applicant's password email failed, rotate and resend that password link:
+
+```bash
+npm run signup:resend-password -- --email applicant@example.com
+```
+
+If a provider/network failure leaves password setup in progress, first verify in PocketBase whether the password change committed. Then reconcile by request ID; `not-committed` rotates and emails a replacement link, while `committed` closes the request without issuing another token:
+
+```bash
+npm run signup:reconcile-password -- --request-id <request-id> --outcome committed
+npm run signup:reconcile-password -- --request-id <request-id> --outcome not-committed
+```
 
 Validate the auth path:
 
@@ -120,6 +147,7 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `SIGNUP_MODE` | `disabled` | `disabled`, `approval`, or `open`. Approval mode requires admin approval before account creation. |
 | `SIGNUP_ENABLED` | `0` | Set `1` only for local signup testing or intentional public registration. |
 | `POCKETBASE_URL` | `http://127.0.0.1:8090` | PocketBase auth endpoint. |
+| `POCKETBASE_PROVISIONING_SECRET` | empty | Required in production approval mode. Shared 32+ character secret for the loopback-only, narrowly scoped approved-user hook. |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in verification, approval, and password setup links. |
 | `ACCESS_APPROVAL_TOKEN` | empty | Required in approval mode. Server-side secret used to hash per-request admin approval tokens. |
 | `SMTP_HOST` | empty | Preferred email provider path. Use Brevo SMTP relay, for example `smtp-relay.brevo.com`. |
@@ -131,12 +159,15 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `BREVO_API_KEY` | empty | Optional Brevo transactional API provider. SMTP is preferred when available. |
 | `RESEND_API_KEY` | empty | Optional fallback provider for approval-mode signup emails. |
 | `MAIL_FROM` | empty | Required for API providers. Can also override the SMTP sender display string. |
-| `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for verified-signup approval notifications. |
-| `TELEGRAM_CHAT_ID` | empty | Optional chat id for verified-signup approval notifications. |
+| `SIGNUP_APPROVAL_EMAIL` | empty | Preferred admin recipient for verified-signup approval links. Required unless both Telegram fallback values are set. |
+| `TELEGRAM_BOT_TOKEN` | empty | Optional fallback bot token for verified-signup approval notifications. |
+| `TELEGRAM_CHAT_ID` | empty | Optional fallback chat id for verified-signup approval notifications. |
 | `SIGNUP_EMAIL_TOKEN_TTL_HOURS` | `24` | Email verification link lifetime. |
 | `SIGNUP_APPROVAL_TOKEN_TTL_HOURS` | `72` | Admin approval link lifetime. |
 | `SIGNUP_PASSWORD_TOKEN_TTL_HOURS` | `24` | Password setup link lifetime. |
 | `SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS` | `300` | Cooldown before a pending signup can resend/rotate a verification link. |
+| `EMAIL_DELIVERY_TIMEOUT_MS` | `10000` | Network timeout for SMTP and API email delivery. |
+| `SIGNUP_NOTIFICATION_TIMEOUT_MS` | `10000` | Per-channel timeout before admin notification fails or falls back. |
 | `OPENCLAW_GATEWAY_URL` | empty | Optional WebSocket gateway for OpenClaw-backed customer replies. |
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
 | `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. Production requires the dedicated `sales-trainer-customer` agent. |
@@ -185,7 +216,7 @@ DIALOGUE_LLM_RENDER_TIMEOUT_MS=10000 \
 npm start
 ```
 
-Check `/api/health` before canarying. It should show `dialogueRendering.enabled`, `dialogueRendering.provider`, `dialogueRendering.timeoutMs`, concurrency limits, and render stats.
+Check `/api/health` before canarying. It shows the dialogue-render settings and stats plus the bounded OpenClaw turn timeout and provider outcome counters. `OPENCLAW_GATEWAY_TIMEOUT_MS` is a single wall-clock budget across connect, agent start, and reply wait, capped at 40000 ms; timeout returns the deterministic customer fallback.
 
 ## Test And Eval Commands
 
@@ -199,6 +230,7 @@ npm run validate:auth
 - `npm test` covers server routes, auth, scoring, scheduling, gauntlets, review queues, and flow guards.
 - `npm run eval:fixtures` checks fixed sales-call fixtures against score bands, assigned drills, and leakage strings.
 - Method calibration reports exact behavior agreement and quadratic weighted kappa; see [docs/method-evaluation.md](docs/method-evaluation.md).
+- Method selection, version retention, legacy migration, and learning-memory isolation are documented in [docs/coaching-methods.md](docs/coaching-methods.md).
 - `npm run smoke` launches Chromium against a temporary local server with mock provider and temp data.
 - `npm run validate:auth` checks a live PocketBase-backed login path.
 

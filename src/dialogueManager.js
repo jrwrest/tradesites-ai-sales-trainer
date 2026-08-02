@@ -22,6 +22,14 @@ const MANUFACTURER_PERMISSION_REPLIES = [
   "Go on then, but be specific. What are you checking for BSB?",
 ];
 
+const ASSET_OWNERSHIP_REPLIES = {
+  "manufacturer-power-payback-report":
+    "The business controls this site. Why does the ownership position matter for the report?",
+  "enterprise-commercial-solar":
+    "Some of our sites are owned and some are leased. Which site and what ownership detail do you need?",
+  default: "We operate from the site, but I would need to check the ownership position. Why does it matter?",
+};
+
 function stableIndex(seedText, modulo) {
   const hash = Array.from(String(seedText || "")).reduce(
     (total, char) => (total * 31 + char.charCodeAt(0)) >>> 0,
@@ -35,7 +43,25 @@ function latestCustomerTurn(session) {
   return customerTurns[customerTurns.length - 1] || null;
 }
 
+function isAssetOwnershipQuestion(text = "") {
+  const normalized = String(text || "");
+  const hasPhysicalAsset =
+    /\b(site|building|premises|property|freehold|roof|facility|facilities|land|solar panels?)\b/i.test(normalized);
+  const hasAssetRelationship =
+    /\b(own|owns|owned|ownership|lease|leases|leased|rent|rents|rented|control|controls|controlled|landlord)\b/i.test(
+      normalized,
+    );
+  const hasExplicitResponsibilityObject =
+    /\b(decision|decisions|budget|budgets|process|procurement|responsibility|internally|contract|contracts|topic)\b/i.test(
+      normalized,
+    );
+  const hasStrongAssetObject = /\b(building|premises|property|freehold|roof|land|landlord|lease|rent)\b/i.test(normalized);
+
+  return hasPhysicalAsset && hasAssetRelationship && (!hasExplicitResponsibilityObject || hasStrongAssetObject);
+}
+
 function isRoutingQuestion(text = "") {
+  if (isAssetOwnershipQuestion(text)) return false;
   return /\b(best\s+(?:best\s+)?person|right person|someone better|better person|best (?:one|person) to (?:speak|talk|deal) with|right (?:one|person) to (?:speak|talk|deal) with|who (?:would be )?(?:best|better) to (?:speak|talk) (?:to|with)|who (?:looks after|handles|owns|deals with)|(?:do|would) you (?:look after|handle|own|cover|deal with)|are you (?:the )?(?:person|one)|would you be (?:the )?(?:person|one)|is this (?:something )?you (?:look after|handle|own|cover|deal with))\b/i.test(
     text,
   );
@@ -131,6 +157,15 @@ function classifyRepTurn({ scenario, session, repMessage }) {
     };
   }
 
+  if (isAssetOwnershipQuestion(repMessage)) {
+    return {
+      label: "discovery_question",
+      discoveryTopic: "asset_ownership",
+      confidence: 0.94,
+      reason: "Rep asked about ownership or control of a physical site asset.",
+    };
+  }
+
   if (isRoutingQuestion(repMessage)) {
     return {
       label: "routing_question",
@@ -203,6 +238,22 @@ function classifyRepTurn({ scenario, session, repMessage }) {
 function buildDialogueReply({ scenario, session, repMessage }) {
   const classification = classifyRepTurn({ scenario, session, repMessage });
   const isManufacturerReport = isManufacturerReportScenario(scenario);
+
+  if (classification.discoveryTopic === "asset_ownership") {
+    return {
+      text: ASSET_OWNERSHIP_REPLIES[scenario.id] || ASSET_OWNERSHIP_REPLIES.default,
+      mood: "guarded",
+      provider: "dialogue_manager",
+      dialogue: {
+        repAct: "asset_ownership_question",
+        customerAction: "answer_asset_ownership",
+        state: "qualification",
+        confidence: classification.confidence,
+        reason: classification.reason,
+        schedulerBlocked: true,
+      },
+    };
+  }
 
   if (classification.label === "routing_question") {
     return {
@@ -350,4 +401,6 @@ function buildDialogueReply({ scenario, session, repMessage }) {
 module.exports = {
   buildDialogueReply,
   classifyRepTurn,
+  isAssetOwnershipQuestion,
+  isRoutingQuestion,
 };

@@ -48,7 +48,7 @@ const scenarios = [
     name: "Large Business Solar Decision-Maker",
     industry: "Large commercial and industrial businesses",
     offerContext:
-      "You are calling larger UK businesses for Solar Future Scotland about whether funded commercial solar, PPA, or a site review could be worth a careful first look.",
+      "The rep is calling larger UK businesses about whether funded commercial solar, PPA, or a site review could be worth a careful first look.",
     goal: "Earn permission, qualify whether there is a real route, and either secure a specific next step or exit cleanly.",
     difficulty: "expert",
     objectionPlaybookId: "enterprise-commercial-solar",

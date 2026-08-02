@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "frameworks": [
+    { "id": "nepq_connecting", "label": "NEPQ Connecting", "behaviorIds": ["nepq_permission_open", "nepq_neutral_language"] },
+    { "id": "nepq_awareness", "label": "NEPQ Awareness Questions", "behaviorIds": ["nepq_situation_question", "nepq_problem_awareness", "nepq_solution_awareness", "nepq_probe_clarify"] },
+    { "id": "nepq_consequence", "label": "NEPQ Consequence", "behaviorIds": ["nepq_consequence_question"] },
+    { "id": "nepq_qualifying", "label": "NEPQ Qualifying", "behaviorIds": ["nepq_desire_qualify", "nepq_means_qualify", "nepq_decision_path"] },
+    { "id": "nepq_presentation", "label": "NEPQ Transition and Presentation", "behaviorIds": ["nepq_permission_transition", "nepq_problem_mapped_presentation"] },
+    { "id": "nepq_commitment", "label": "NEPQ Commitment", "behaviorIds": ["nepq_conditional_commitment", "nepq_commitment_reason", "nepq_calendar_next_step"] },
+    { "id": "nepq_objection_dialogue", "label": "NEPQ Objection Dialogue", "behaviorIds": ["nepq_objection_clarify", "nepq_objection_prevention", "nepq_hard_no_clean_exit"] }
+  ],
+  "stages": [
+    { "id": "open", "order": 10, "label": "Connect without pressure", "behaviorIds": ["nepq_permission_open", "nepq_neutral_language"] },
+    { "id": "situation", "order": 20, "label": "Understand the situation", "behaviorIds": ["nepq_situation_question"] },
+    { "id": "problem", "order": 30, "label": "Build problem awareness", "behaviorIds": ["nepq_problem_awareness", "nepq_probe_clarify"] },
+    { "id": "solution", "order": 40, "label": "Build solution awareness", "behaviorIds": ["nepq_solution_awareness"] },
+    { "id": "consequence", "order": 50, "label": "Explore consequences", "behaviorIds": ["nepq_consequence_question"] },
+    { "id": "qualify", "order": 60, "label": "Qualify desire, means, and process", "behaviorIds": ["nepq_desire_qualify", "nepq_means_qualify", "nepq_decision_path"] },
+    { "id": "present", "order": 70, "label": "Transition and present", "behaviorIds": ["nepq_permission_transition", "nepq_problem_mapped_presentation"] },
+    { "id": "commitment", "order": 80, "label": "Invite commitment", "behaviorIds": ["nepq_conditional_commitment", "nepq_commitment_reason", "nepq_calendar_next_step"] },
+    { "id": "resolve", "order": 90, "label": "Prevent and clarify objections", "behaviorIds": ["nepq_objection_clarify", "nepq_objection_prevention", "nepq_hard_no_clean_exit"] }
+  ],
+  "behaviors": [
+    { "id": "nepq_permission_open", "stageId": "open", "label": "Permission-led connection", "critical": false, "description": "State a transparent reason and invite a brief, low-pressure conversation.", "positiveEvidence": ["transparent reason", "permission", "easy out"], "counterEvidence": ["scripted pressure", "hides the reason"], "sourceRefs": ["connecting"] },
+    { "id": "nepq_neutral_language", "stageId": "open", "label": "Neutral and detached language", "critical": true, "description": "Sound curious and unattached to forcing an outcome.", "positiveEvidence": ["might", "possibly", "would it make sense"], "counterEvidence": ["you need this", "obvious fit", "pressure"], "sourceRefs": ["connecting", "objections"] },
+    { "id": "nepq_situation_question", "stageId": "situation", "label": "Situation question", "critical": false, "description": "Learn the prospect's current energy, site, and contract context without interrogating.", "positiveEvidence": ["current process or circumstances"], "counterEvidence": ["assumes context", "rapid checklist"], "sourceRefs": ["situation"] },
+    { "id": "nepq_problem_awareness", "stageId": "problem", "label": "Problem-awareness question", "critical": true, "description": "Help the prospect describe what is not working and why it matters.", "positiveEvidence": ["prospect names a problem or concern"], "counterEvidence": ["rep declares the problem"], "sourceRefs": ["problem"] },
+    { "id": "nepq_probe_clarify", "stageId": "problem", "label": "Probe and clarify", "critical": false, "description": "Follow the prospect's words with a neutral clarification.", "positiveEvidence": ["what do you mean", "how so", "in what way"], "counterEvidence": ["jumps to solution"], "sourceRefs": ["problem", "objections"] },
+    { "id": "nepq_solution_awareness", "stageId": "solution", "label": "Solution-awareness question", "critical": false, "description": "Let the prospect define what a better result would change for them.", "positiveEvidence": ["desired outcome in prospect terms"], "counterEvidence": ["feature-led desired state"], "sourceRefs": ["solution"] },
+    { "id": "nepq_consequence_question", "stageId": "consequence", "label": "Consequence question", "critical": true, "description": "Explore the practical consequence of leaving a prospect-defined problem unchanged.", "positiveEvidence": ["prospect considers cost or impact"], "counterEvidence": ["manufactured fear"], "sourceRefs": ["consequence"] },
+    { "id": "nepq_desire_qualify", "stageId": "qualify", "label": "Qualify desire and timing", "critical": false, "description": "Verify that change matters enough and establish a real timing trigger.", "positiveEvidence": ["priority and timing verified"], "counterEvidence": ["invented urgency"], "sourceRefs": ["qualifying"] },
+    { "id": "nepq_means_qualify", "stageId": "qualify", "label": "Qualify commercial means", "critical": false, "description": "Explore budget, spend, or commercial route naturally.", "positiveEvidence": ["commercial ability or threshold"], "counterEvidence": ["assumes affordability"], "sourceRefs": ["qualifying"] },
+    { "id": "nepq_decision_path", "stageId": "qualify", "label": "Map the decision path", "critical": true, "description": "Map who participates and what evidence or process they require.", "positiveEvidence": ["stakeholders and approval path"], "counterEvidence": ["bypasses authority"], "sourceRefs": ["qualifying"] },
+    { "id": "nepq_permission_transition", "stageId": "present", "label": "Permission-led transition", "critical": false, "description": "Ask permission to explain only after enough diagnosis.", "positiveEvidence": ["permission before presentation"], "counterEvidence": ["premature pitch"], "sourceRefs": ["presentation"] },
+    { "id": "nepq_problem_mapped_presentation", "stageId": "present", "label": "Problem-mapped presentation", "critical": true, "description": "Connect a concise explanation to problems and outcomes the prospect supplied.", "positiveEvidence": ["because you said", "maps solution to stated gap"], "counterEvidence": ["generic feature dump"], "sourceRefs": ["presentation"] },
+    { "id": "nepq_conditional_commitment", "stageId": "commitment", "label": "Conditional commitment", "critical": false, "description": "Use a low-pressure conditional question to test whether the next step could fit.", "positiveEvidence": ["could this be", "would this possibly"], "counterEvidence": ["forced close"], "sourceRefs": ["commitment"] },
+    { "id": "nepq_commitment_reason", "stageId": "commitment", "label": "Prospect-owned reason", "critical": false, "description": "Ask why the prospect believes the next step might be right.", "positiveEvidence": ["why do you feel", "why though"], "counterEvidence": ["rep argues for commitment"], "sourceRefs": ["commitment"] },
+    { "id": "nepq_calendar_next_step", "stageId": "commitment", "label": "Concrete calendar step", "critical": false, "description": "Turn qualified interest into a specific mutual next step.", "positiveEvidence": ["named people, date, or time"], "counterEvidence": ["vague follow-up"], "sourceRefs": ["commitment"] },
+    { "id": "nepq_objection_clarify", "stageId": "resolve", "label": "Clarify the objection", "critical": false, "description": "Understand what the concern means before trying to resolve it.", "positiveEvidence": ["when you say", "what specifically"], "counterEvidence": ["instant rebuttal"], "sourceRefs": ["objections"] },
+    { "id": "nepq_objection_prevention", "stageId": "resolve", "label": "Prevent objections through diagnosis", "critical": false, "description": "Use earlier answers to reveal and resolve uncertainty before the commitment question.", "positiveEvidence": ["checks remaining concern", "returns to prior answer"], "counterEvidence": ["canned objection script"], "sourceRefs": ["objections"] },
+    { "id": "nepq_hard_no_clean_exit", "stageId": "resolve", "label": "Clean hard-no exit", "critical": true, "description": "Honor an explicit no or opt-out and end without another persuasion attempt.", "positiveEvidence": ["acknowledges and exits"], "counterEvidence": ["continues after opt-out"], "sourceRefs": ["objections"] }
+  ]
+}

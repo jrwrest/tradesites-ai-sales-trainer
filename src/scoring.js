@@ -13,6 +13,11 @@ function summarizeHelpAccuracy(helpAttempts = []) {
 
 function scoreTranscript({ scenario, turns, helpAttempts = [], methodPack }) {
   const isManufacturerReport = scenario.id === "manufacturer-power-payback-report";
+  const isCommercialSolar = [
+    "manufacturer-power-payback-report",
+    "enterprise-commercial-solar",
+    "commercial-solar-rejection",
+  ].includes(scenario.id);
   const repTurns = turns.filter((turn) => turn.role === "user" || turn.speaker === "rep");
   const repText = repTurns.map((turn) => turn.text.toLowerCase()).join(" ");
   const customerText = turns
@@ -33,9 +38,9 @@ function scoreTranscript({ scenario, turns, helpAttempts = [], methodPack }) {
     /\b(current|today|how do you|what happens|lead|enquir|review|referral|follow.?up|competitor|problem|challenge)\b/.test(
       repText,
     );
-  const manufacturerDiscovery =
+  const commercialSolarDiscovery =
     /\b(electricity|energy|power|spend|bill|site|roof|own|lease|finance|decision)\b/.test(repText);
-  const discovery = baseDiscovery || (isManufacturerReport && manufacturerDiscovery);
+  const discovery = baseDiscovery || (isCommercialSolar && commercialSolarDiscovery);
   const listened =
     /\b(you mentioned|sounds like|so|because|that means|if i heard you)\b/.test(repText) ||
     repTurns.length >= 3;
@@ -77,9 +82,23 @@ function scoreTranscript({ scenario, turns, helpAttempts = [], methodPack }) {
   }
 
   const missedOpportunities = [];
-  if (!discovery) missedOpportunities.push("Ask more about the prospect's current lead flow and follow-up process.");
-  if (!handledObjection) missedOpportunities.push("Acknowledge and unpack objections before moving on.");
-  if (!mentionedNextStep) missedOpportunities.push("Close with a specific next step instead of leaving the call open-ended.");
+  if (!discovery && !hardRejection) {
+    missedOpportunities.push(
+      isCommercialSolar
+        ? "Ask about the prospect's current energy position, site control, commercial need, and decision process."
+        : "Ask more about the prospect's current lead flow and follow-up process.",
+    );
+  }
+  if (!handledObjection) {
+    missedOpportunities.push(
+      hardRejection
+        ? "Acknowledge the explicit hard no, confirm the contact request, and exit cleanly."
+        : "Acknowledge and unpack objections before moving on.",
+    );
+  }
+  if (!mentionedNextStep && !hardRejection) {
+    missedOpportunities.push("Close with a specific next step instead of leaving the call open-ended.");
+  }
 
   const strengths = [];
   if (askedQuestions >= 2) strengths.push("You asked discovery questions instead of jumping straight into a pitch.");

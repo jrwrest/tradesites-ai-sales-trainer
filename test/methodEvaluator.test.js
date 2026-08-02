@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { evaluateMethod } = require("../src/methodEvaluator");
+const { listMethodPacks, resolveMethodPack } = require("../src/methodPack");
+const { getScenario } = require("../src/scenarios");
 
 test("unobserved behaviors score zero with low confidence instead of a neutral default", () => {
   const evaluation = evaluateMethod({
@@ -16,7 +18,7 @@ test("unobserved behaviors score zero with low confidence instead of a neutral d
   assert.equal(clarify.evidence.length, 0);
   assert.equal(clarify.counterEvidence.length, 0);
   assert.equal(evaluation.methodPack.id, "hormozi-sales-2026");
-  assert.equal(evaluation.methodPack.version, "1.0.0-beta.2");
+  assert.equal(evaluation.methodPack.version, "1.0.0-beta.3");
 });
 
 test("strong sales conversation produces turn-level evidence across the core frameworks", () => {
@@ -92,4 +94,60 @@ test("unverifiable truth and fit gates remain reviewable rather than auto-passin
 
   assert.equal(evaluation.criticalGates.find((item) => item.id === "truthful_claims").status, "review");
   assert.equal(evaluation.criticalGates.find((item) => item.id === "fit_before_commitment").status, "not_observed");
+});
+
+test("each registered method evaluates an NEPQ-shaped realistic call with only its own detectors", () => {
+  const turns = [
+    { role: "persona", text: "Who is this, and what is the call about?" },
+    { role: "user", text: "It is Ava from Northstar Energy. I am not sure this is even relevant yet. Would you be opposed to a couple of questions to work out whether it is worth a look?" },
+    { role: "persona", text: "Okay, briefly." },
+    { role: "user", text: "How is the site powered today, and roughly what is the electricity spend?" },
+    { role: "persona", text: "Grid power, around GBP 180,000 a year, and it keeps increasing." },
+    { role: "user", text: "When that number keeps increasing, where does it have the biggest impact on the operation?" },
+    { role: "persona", text: "It squeezes margin on every order." },
+    { role: "user", text: "What have you tried so far to get that under control, if anything?" },
+    { role: "persona", text: "We renegotiated supply, but have not assessed solar or a PPA properly." },
+    { role: "user", text: "What happens to margin over the next twelve months if nothing changes?" },
+    { role: "persona", text: "We either absorb it or become less competitive." },
+    { role: "user", text: "How important is it to understand the options now, and who besides you would need to see the numbers?" },
+    { role: "persona", text: "Important. Operations and finance would both review it." },
+    { role: "user", text: "Based on what you said, a site assessment might be worth a look because the rising spend is squeezing margin. Is that a fair read?" },
+    { role: "persona", text: "Yes." },
+    { role: "user", text: "Would it be appropriate to book the assessment with operations and finance for Tuesday?" },
+  ];
+  const scenario = getScenario("enterprise-commercial-solar");
+
+  for (const method of listMethodPacks()) {
+    const methodPack = resolveMethodPack(method);
+    const evaluation = evaluateMethod({ turns, scenario, methodPack });
+    const behaviorIds = new Set(methodPack.framework.behaviors.map((item) => item.id));
+    const stageIds = new Set(methodPack.framework.stages.map((item) => item.id));
+    const gateIds = new Set(methodPack.rubric.criticalGates.map((item) => item.id));
+
+    assert.deepEqual(evaluation.methodPack, { id: method.id, version: method.version });
+    assert.ok(evaluation.behaviors.every((item) => behaviorIds.has(item.id)), `${method.id} leaked behavior`);
+    assert.ok(evaluation.stages.every((item) => stageIds.has(item.id)), `${method.id} leaked stage`);
+    assert.ok(evaluation.criticalGates.every((item) => gateIds.has(item.id)), `${method.id} leaked gate`);
+    assert.ok(
+      evaluation.behaviors.filter((item) => item.evidence.length > 0).length >= 5,
+      `${method.id} did not detect the realistic call`,
+    );
+    assert.ok(evaluation.overallScore >= 50, `${method.id} scored a realistic call ${evaluation.overallScore}`);
+  }
+});
+
+test("hard do-not-call exit passes the ethical gate under every registered method", () => {
+  const turns = [
+    { role: "persona", text: "Take us off your list and do not call again." },
+    { role: "user", text: "Understood. I will remove you and will not call again. Goodbye." },
+  ];
+
+  for (const method of listMethodPacks()) {
+    const methodPack = resolveMethodPack(method);
+    const evaluation = evaluateMethod({ turns, methodPack });
+    const gate = evaluation.criticalGates.find((item) => item.id === "respect_hard_no");
+    assert.ok(gate, `${method.id} must declare respect_hard_no`);
+    assert.equal(gate.status, "pass", method.id);
+    assert.notEqual(evaluation.assignedDrill?.behaviorId, "hard_no_clean_exit", method.id);
+  }
 });

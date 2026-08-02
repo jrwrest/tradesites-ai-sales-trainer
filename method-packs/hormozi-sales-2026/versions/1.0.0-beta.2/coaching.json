@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "mode": "legacy_passthrough",
+  "allowedTemplateTokens": ["repName", "companyName"],
+  "frameworkByStage": {
+    "opener": "proof_promise_plan",
+    "permission": "proof_promise_plan",
+    "discovery": "closer",
+    "qualification": "bant",
+    "commercial": "three_pillar_pitch",
+    "close": "aaa"
+  },
+  "frameworkByMove": {
+    "ask_permission": "proof_promise_plan",
+    "clarify": "closer",
+    "qualify": "bant",
+    "route": "bant",
+    "commercial_explain": "aaa",
+    "exit": "aaa"
+  },
+  "techniques": {
+    "proof_promise_plan": {
+      "sourceRefs": ["sales_conversation"],
+      "prompt": "Open with truthful proof, promise a useful decision, then agree a short plan.",
+      "guidance": [
+        "Use concise, relevant proof rather than a generic claim.",
+        "State what useful decision the conversation will help make.",
+        "Set the short sequence and ask permission to continue."
+      ],
+      "template": "It is {repName} from {companyName}. We help businesses work out whether there is a real fit. I will ask a couple of questions, then we can decide whether a next step makes sense. Fair?"
+    },
+    "closer": {
+      "sourceRefs": ["sales_conversation", "closing"],
+      "prompt": "Clarify the current state, label the gap, then understand the concern before responding.",
+      "guidance": [
+        "Diagnose before presenting a solution.",
+        "Summarize the gap and check that you understood it correctly.",
+        "Ask what sits behind the concern before answering it."
+      ],
+      "template": "When you say that, what specifically would have to be true for this to be worth looking at?"
+    },
+    "bant": {
+      "sourceRefs": ["before_sale", "closing"],
+      "prompt": "Verify budget, authority, need, and timing without treating qualification as an interrogation.",
+      "guidance": [
+        "Confirm a real need before asking for commitment.",
+        "Map the decision and approval path instead of bypassing it.",
+        "Establish a credible commercial route and timing trigger."
+      ],
+      "template": "Who besides you would need to be comfortable with this, and what would they need to see before it could move forward?"
+    },
+    "three_pillar_pitch": {
+      "sourceRefs": ["sales_conversation"],
+      "prompt": "Present the desired destination and a three-part bridge tied to the diagnosis.",
+      "guidance": [
+        "Lead with the outcome, not a feature list.",
+        "Use three memorable requirements.",
+        "Connect each requirement to what the prospect said was missing."
+      ],
+      "template": "Based on what you said, the result depends on three things: a clear business case, a workable route, and an approval-ready next step."
+    },
+    "aaa": {
+      "sourceRefs": ["closing"],
+      "prompt": "Acknowledge the concern, associate it with a truthful explanation, then ask the next diagnostic question.",
+      "guidance": [
+        "Reflect the concern without arguing.",
+        "Use only truthful, relevant proof or explanation.",
+        "Return the conversation to the prospect with one clear question."
+      ],
+      "template": "That is a fair concern. The useful question is whether the underlying fit is strong enough to justify a next step. What would you need to see to decide that?"
+    }
+  }
+}

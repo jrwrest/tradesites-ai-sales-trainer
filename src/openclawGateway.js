@@ -2,6 +2,39 @@ const crypto = require("node:crypto");
 const WebSocket = require("ws");
 
 const TERMINAL_PHASES = new Set(["end", "error"]);
+const DEFAULT_OPENCLAW_TIMEOUT_MS = 40000;
+const MAX_OPENCLAW_TIMEOUT_MS = 40000;
+const OPENCLAW_CONNECT_TIMEOUT_MS = 3000;
+const OPENCLAW_AGENT_START_TIMEOUT_MS = 3000;
+const openClawStats = {
+  attempts: 0,
+  successes: 0,
+  timeouts: 0,
+  errors: 0,
+  abortAttempts: 0,
+  abortFailures: 0,
+  active: 0,
+  lastLatencyMs: null,
+};
+
+function openClawTimeoutError(timeoutMs) {
+  const error = new Error(`OpenClaw gateway timed out after ${timeoutMs}ms`);
+  error.code = "OPENCLAW_TIMEOUT";
+  return error;
+}
+
+function getOpenClawTimeoutMs(value = process.env.OPENCLAW_GATEWAY_TIMEOUT_MS) {
+  if (value === undefined || value === null || value === "") return DEFAULT_OPENCLAW_TIMEOUT_MS;
+  const timeoutMs = Number(value);
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("OPENCLAW_GATEWAY_TIMEOUT_MS must be a positive integer");
+  }
+  return Math.min(timeoutMs, MAX_OPENCLAW_TIMEOUT_MS);
+}
+
+function getOpenClawStats() {
+  return { ...openClawStats };
+}
 
 function asRecord(value) {
   return value && typeof value === "object" ? value : {};
@@ -32,7 +65,7 @@ function formatGatewayError(error) {
 }
 
 class OpenClawGatewayClient {
-  constructor({ url, token, timeoutMs = 120000, agentId = "main" }) {
+  constructor({ url, token, timeoutMs = DEFAULT_OPENCLAW_TIMEOUT_MS, agentId = "main" }) {
     this.url = url;
     this.token = token;
     this.timeoutMs = timeoutMs;
@@ -42,9 +75,11 @@ class OpenClawGatewayClient {
     this.ws = null;
     this.currentRun = null;
     this.assistantText = "";
+    this.closed = false;
   }
 
   connect() {
+    this.closed = false;
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(this.url, { maxPayload: 25 * 1024 * 1024 });
       this.ws = ws;
@@ -52,7 +87,7 @@ class OpenClawGatewayClient {
       const timer = setTimeout(() => {
         reject(new Error("OpenClaw gateway connect timed out"));
         this.close();
-      }, Math.min(this.timeoutMs, 30000));
+      }, Math.min(this.timeoutMs, OPENCLAW_CONNECT_TIMEOUT_MS));
 
       ws.on("message", (raw) => {
         this.handleMessage(String(raw), resolve, reject, timer);
@@ -73,6 +108,7 @@ class OpenClawGatewayClient {
   }
 
   handleMessage(raw, connectResolve, connectReject, connectTimer) {
+    if (this.closed) return;
     let frame;
     try {
       frame = JSON.parse(raw);
@@ -171,16 +207,18 @@ class OpenClawGatewayClient {
     return promise;
   }
 
-  async runCustomerPrompt(input, sessionKey) {
+  async runCustomerPrompt(input, sessionKey, deadline = Date.now() + this.timeoutMs) {
+    const remaining = () => Math.max(1, deadline - Date.now());
+    const acceptedBudgetMs = Math.min(remaining(), OPENCLAW_AGENT_START_TIMEOUT_MS);
     const accepted = await this.request("agent", {
       message: input,
       agentId: this.agentId,
       sessionKey,
       deliver: false,
-      timeout: Math.ceil(this.timeoutMs / 1000),
+      timeout: Math.ceil(acceptedBudgetMs / 1000),
       label: "Tradesites AI Sales Trainer customer reply",
       idempotencyKey: crypto.randomUUID(),
-    });
+    }, acceptedBudgetMs);
 
     const runId = asRecord(accepted).runId;
     if (typeof runId !== "string" || !runId) {
@@ -189,10 +227,11 @@ class OpenClawGatewayClient {
 
     this.currentRun = runId;
     this.assistantText = "";
+    const waitBudgetMs = remaining();
     const result = await this.request(
       "agent.wait",
-      { runId, timeoutMs: this.timeoutMs },
-      this.timeoutMs + 5000,
+      { runId, timeoutMs: waitBudgetMs },
+      waitBudgetMs,
     );
 
     if (!this.assistantText.trim()) {
@@ -206,11 +245,42 @@ class OpenClawGatewayClient {
     };
   }
 
+  abortCurrentRun() {
+    if (!this.currentRun || !this.ws || this.ws.readyState !== WebSocket.OPEN) return Promise.resolve(false);
+    const runId = this.currentRun;
+    this.currentRun = null;
+    const frame = {
+      type: "req",
+      id: crypto.randomUUID(),
+      method: "sessions.abort",
+      params: { runId },
+    };
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(true), 50);
+      this.ws.send(JSON.stringify(frame), (error) => {
+        clearTimeout(timer);
+        resolve(!error);
+      });
+    });
+  }
+
+  hasCurrentRun() {
+    return Boolean(this.currentRun);
+  }
+
   close() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    this.closed = true;
+    this.currentRun = null;
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("OpenClaw gateway closed"));
     }
+    this.pending.clear();
+    const ws = this.ws;
+    this.ws = null;
+    if (!ws) return;
+    if (ws.readyState === WebSocket.OPEN) ws.close();
+    else if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
   }
 }
 
@@ -268,19 +338,52 @@ async function runOpenClawBrain(payload, options = {}) {
   if (!token) throw new Error("OPENCLAW_GATEWAY_TOKEN is not set");
   validateGatewayUrl(url);
 
-  const timeoutMs = Number(options.timeoutMs ?? process.env.OPENCLAW_GATEWAY_TIMEOUT_MS ?? 45000);
+  const timeoutMs = getOpenClawTimeoutMs(options.timeoutMs);
   const agentId = process.env.OPENCLAW_AGENT_ID || "main";
   const sessionKey = `agent:${agentId}:tradesites-ai-sales-trainer:${payload.scenario.id}:${payload.sessionId || "local"}`;
   const client = new OpenClawGatewayClient({ url, token, timeoutMs, agentId });
 
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  openClawStats.attempts += 1;
+  openClawStats.active += 1;
+  let deadlineTimer;
   try {
-    await client.connect();
-    const result = await client.runCustomerPrompt(buildOpenClawPrompt(payload), sessionKey);
+    const providerWork = (async () => {
+      await client.connect();
+      return client.runCustomerPrompt(buildOpenClawPrompt(payload), sessionKey, deadline);
+    })();
+    const result = await Promise.race([
+      providerWork,
+      new Promise((_, reject) => {
+        deadlineTimer = setTimeout(() => reject(openClawTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+    const providerLatencyMs = Date.now() - startedAt;
+    openClawStats.successes += 1;
+    openClawStats.lastLatencyMs = providerLatencyMs;
     return {
       ...parseCustomerReply(result.text),
       provider: "openclaw",
+      providerLatencyMs,
     };
+  } catch (error) {
+    const timedOut = error.code === "OPENCLAW_TIMEOUT" || /timed out/i.test(error.message || "");
+    if (timedOut) {
+      error.code = "OPENCLAW_TIMEOUT";
+      openClawStats.timeouts += 1;
+      if (client.hasCurrentRun()) {
+        openClawStats.abortAttempts += 1;
+        if (!(await client.abortCurrentRun())) openClawStats.abortFailures += 1;
+      }
+    } else {
+      openClawStats.errors += 1;
+    }
+    openClawStats.lastLatencyMs = Date.now() - startedAt;
+    throw error;
   } finally {
+    clearTimeout(deadlineTimer);
+    openClawStats.active = Math.max(0, openClawStats.active - 1);
     client.close();
   }
 }
@@ -314,6 +417,8 @@ module.exports = {
   OpenClawGatewayClient,
   buildOpenClawPrompt,
   checkOpenClawGateway,
+  getOpenClawStats,
+  getOpenClawTimeoutMs,
   parseCustomerReply,
   runOpenClawBrain,
   validateGatewayUrl,
