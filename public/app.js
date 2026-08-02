@@ -547,20 +547,63 @@ function renderProfile(profile) {
   const button = document.createElement("button");
   button.type = "submit";
   button.textContent = "Save Profile";
-  form.append(button);
+  const profileSaveStatus = document.createElement("p");
+  profileSaveStatus.className = "profile-save-status";
+  profileSaveStatus.setAttribute("role", "status");
+  profileSaveStatus.setAttribute("aria-live", "polite");
+  profileSaveStatus.setAttribute("aria-atomic", "true");
+  form.append(button, profileSaveStatus);
+
+  form.addEventListener("input", () => {
+    if (profileSaveStatus.textContent === "Profile saved.") {
+      profileSaveStatus.textContent = "Unsaved changes.";
+    }
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (button.disabled) return;
+
     const data = Object.fromEntries(new FormData(form).entries());
+    const controls = [...form.querySelectorAll("input, textarea, select")];
+    button.disabled = true;
+    button.textContent = "Saving...";
+    controls.forEach((control) => { control.disabled = true; });
+    confirmation.disabled = true;
+    deleteButton.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    profileSaveStatus.className = "profile-save-status";
+    profileSaveStatus.setAttribute("role", "status");
+    profileSaveStatus.textContent = "Saving profile...";
+    state.waiting = true;
+    setButtons();
     try {
       const payload = await api("/api/profile", {
         method: "PUT",
         body: JSON.stringify({ profile: data }),
       });
-      renderProfile(payload.profile);
+      controls.forEach((control) => {
+        if (Object.hasOwn(payload.profile, control.name)) {
+          control.value = payload.profile[control.name] || "";
+        }
+      });
+      profileSaveStatus.textContent = "Profile saved.";
       setStatus("Profile saved.");
     } catch (error) {
+      profileSaveStatus.className = "profile-save-status error";
+      profileSaveStatus.setAttribute("role", "alert");
+      profileSaveStatus.textContent = `Could not save profile: ${error.message}`;
       setStatus(error.message, true);
+    } finally {
+      controls.forEach((control) => { control.disabled = false; });
+      confirmation.disabled = false;
+      deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
+      button.disabled = false;
+      button.textContent = "Save Profile";
+      form.removeAttribute("aria-busy");
+      state.waiting = false;
+      setButtons();
+      button.focus();
     }
   });
 
@@ -582,6 +625,14 @@ function renderProfile(profile) {
     deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
   });
   deleteButton.addEventListener("click", async () => {
+    if (state.waiting) return;
+
+    const profileControls = [...form.querySelectorAll("input, textarea, select")];
+    state.waiting = true;
+    setButtons();
+    profileControls.forEach((control) => { control.disabled = true; });
+    button.disabled = true;
+    confirmation.disabled = true;
     deleteButton.disabled = true;
     try {
       await api("/api/account-data", {
@@ -593,6 +644,12 @@ function renderProfile(profile) {
       setStatus("Your saved training data was deleted.");
     } catch (error) {
       setStatus(error.message, true);
+    } finally {
+      state.waiting = false;
+      setButtons();
+      profileControls.forEach((control) => { control.disabled = false; });
+      button.disabled = false;
+      confirmation.disabled = false;
       deleteButton.disabled = confirmation.value !== "DELETE MY TRAINING DATA";
     }
   });
