@@ -209,13 +209,14 @@ class OpenClawGatewayClient {
 
   async runCustomerPrompt(input, sessionKey, deadline = Date.now() + this.timeoutMs) {
     const remaining = () => Math.max(1, deadline - Date.now());
-    const acceptedBudgetMs = Math.min(remaining(), OPENCLAW_AGENT_START_TIMEOUT_MS);
+    const agentTurnBudgetMs = remaining();
+    const acceptedBudgetMs = Math.min(agentTurnBudgetMs, OPENCLAW_AGENT_START_TIMEOUT_MS);
     const accepted = await this.request("agent", {
       message: input,
       agentId: this.agentId,
       sessionKey,
       deliver: false,
-      timeout: Math.ceil(acceptedBudgetMs / 1000),
+      timeout: Math.ceil(agentTurnBudgetMs / 1000),
       label: "Tradesites AI Sales Trainer customer reply",
       idempotencyKey: crypto.randomUUID(),
     }, acceptedBudgetMs);

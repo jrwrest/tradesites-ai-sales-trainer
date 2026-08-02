@@ -1,7 +1,12 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { WebSocketServer } = require("ws");
-const { checkOpenClawGateway, runOpenClawBrain, validateGatewayUrl } = require("../src/openclawGateway");
+const {
+  OpenClawGatewayClient,
+  checkOpenClawGateway,
+  runOpenClawBrain,
+  validateGatewayUrl,
+} = require("../src/openclawGateway");
 const { getScenario } = require("../src/scenarios");
 
 function send(socket, payload) {
@@ -105,40 +110,32 @@ test("OpenClaw gateway brain runs through websocket RPC", async () => {
   }
 });
 
-test("OpenClaw gateway brain accepts a per-call timeout override", async () => {
-  const gateway = await startFakeGateway();
-  process.env.OPENCLAW_GATEWAY_URL = gateway.url;
-  process.env.OPENCLAW_GATEWAY_TOKEN = "test-token";
-  process.env.OPENCLAW_GATEWAY_TIMEOUT_MS = "45000";
+test("OpenClaw gives an accepted agent the remaining full-turn timeout", async () => {
+  const client = new OpenClawGatewayClient({
+    url: "ws://127.0.0.1:18789",
+    token: "test-token",
+    timeoutMs: 7000,
+  });
+  const calls = [];
+  client.request = async (method, params, timeoutMs) => {
+    calls.push({ method, params, timeoutMs });
+    if (method === "agent") return { runId: "turn-budget-run" };
+    return { text: '{"reply":"A valid delayed customer reply","mood":"guarded"}' };
+  };
 
-  try {
-    await runOpenClawBrain(
-      {
-        instruction: "reply as customer",
-        scenario: getScenario("commercial-solar-rejection"),
-        sessionId: "test-session",
-        transcript: [],
-        latestRepMessage: "Have you heard of solar PPA?",
-      },
-      { timeoutMs: 7000 },
-    );
+  const result = await client.runCustomerPrompt(
+    "reply as customer",
+    "agent:main:trainer:test-session",
+    Date.now() + 7000,
+  );
 
-    assert.equal(gateway.requests[1].method, "agent");
-    assert.ok(gateway.requests[1].params.timeout > 0);
-    assert.ok(gateway.requests[1].params.timeout <= 3);
-    assert.equal(
-      gateway.requests[1].params.sessionKey,
-      "agent:main:tradesites-ai-sales-trainer:commercial-solar-rejection:test-session",
-    );
-    assert.equal(gateway.requests[2].method, "agent.wait");
-    assert.ok(gateway.requests[2].params.timeoutMs > 0);
-    assert.ok(gateway.requests[2].params.timeoutMs <= 7000);
-  } finally {
-    delete process.env.OPENCLAW_GATEWAY_URL;
-    delete process.env.OPENCLAW_GATEWAY_TOKEN;
-    delete process.env.OPENCLAW_GATEWAY_TIMEOUT_MS;
-    await gateway.close();
-  }
+  assert.match(result.text, /valid delayed customer reply/);
+  assert.equal(calls[0].method, "agent");
+  assert.equal(calls[0].timeoutMs, 3000, "only acknowledgement waiting is capped at 3 seconds");
+  assert.ok(calls[0].params.timeout > 3 && calls[0].params.timeout <= 7);
+  assert.equal(calls[1].method, "agent.wait");
+  assert.ok(calls[1].timeoutMs > 0 && calls[1].timeoutMs <= 7000);
+  assert.equal(calls[1].params.timeoutMs, calls[1].timeoutMs);
 });
 
 test("OpenClaw timeout is one end-to-end deadline across accepted and wait phases", async () => {
