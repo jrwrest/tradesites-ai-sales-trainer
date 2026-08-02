@@ -4,6 +4,7 @@ const { WebSocketServer } = require("ws");
 const {
   OpenClawGatewayClient,
   checkOpenClawGateway,
+  parseCustomerReply,
   runOpenClawBrain,
   validateGatewayUrl,
 } = require("../src/openclawGateway");
@@ -12,6 +13,29 @@ const { getScenario } = require("../src/scenarios");
 function send(socket, payload) {
   socket.send(JSON.stringify(payload));
 }
+
+test("OpenClaw parser preserves only a valid optional objection id", () => {
+  const parsed = parseCustomerReply(JSON.stringify({
+    reply: "Why should we pay for the report?",
+    mood: "skeptical",
+    objectionId: "power-payback-why-pay",
+    objectionType: "hard_no",
+  }));
+
+  assert.deepEqual(parsed, {
+    text: "Why should we pay for the report?",
+    mood: "skeptical",
+    objectionId: "power-payback-why-pay",
+  });
+
+  const nonString = parseCustomerReply(JSON.stringify({
+    reply: "What happens next?",
+    objectionId: 42,
+    objectionType: "commercial_risk",
+  }));
+  assert.equal(Object.hasOwn(nonString, "objectionId"), false);
+  assert.equal(Object.hasOwn(nonString, "objectionType"), false);
+});
 
 async function startFakeGateway() {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
