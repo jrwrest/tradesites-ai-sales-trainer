@@ -10,5 +10,6 @@ Pack contents:
 - `framework.json`: PPP, BANT, CLOSER, three-pillar presentation, AAA, enterprise adaptation, and observable evidence.
 - `rubric.json`: evidence scale, stage weights, confidence rules, and non-negotiable gates.
 - `drills.json`: single-constraint deliberate-practice loops.
+- `coaching.json`: method-owned technique guidance, framework routing, and allowlisted identity templates.
 
-The app must pin the pack version on every new session and preserve that version in the evaluation. Pack changes require fixture review and a version bump.
+The app must pin the pack version on every new session and preserve that version in the evaluation. Pack changes require fixture review and a version bump. Historical pins remain under `versions/`; `1.0.0-beta.2` uses a legacy coaching adapter while `1.0.0-beta.3` introduces method-owned live coaching.

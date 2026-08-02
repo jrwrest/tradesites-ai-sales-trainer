@@ -61,3 +61,27 @@ test("score card prioritizes the source-grounded method drill and confidence", a
   assert.match(renderScore, /criticalGates/);
   assert.match(renderScore, /drill\?\.behaviorId/);
 });
+
+test("Profile loads the method registry and submits a coaching method selector", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const renderProfile = appJs.slice(
+    appJs.indexOf("function renderProfile("),
+    appJs.indexOf("function updateTimer()"),
+  );
+
+  assert.match(appJs, /api\("\/api\/methods"\)/);
+  assert.match(renderProfile, /coachingMethodId/);
+  assert.match(renderProfile, /Coaching method/);
+  assert.match(renderProfile, /document\.createElement\("select"\)/);
+});
+
+test("completed gauntlets render the pinned method evaluation and drill", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const submitMessage = appJs.slice(
+    appJs.indexOf("async function submitMessage()"),
+    appJs.indexOf("async function endCall()"),
+  );
+
+  assert.match(submitMessage, /renderScore\(state\.session\.evaluation\)/);
+  assert.doesNotMatch(submitMessage, /recommendedDrill: `Repeat the gauntlet/);
+});

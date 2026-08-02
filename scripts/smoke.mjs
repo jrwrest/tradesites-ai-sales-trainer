@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -63,17 +64,25 @@ async function main() {
       path.join(dataDir, "skill-memory.json"),
       `${JSON.stringify(
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           repId: "smoke",
-          skills: {
-            hard_no_clean_exit: {
-              score: 4,
-              confidence: 0.5,
-              attempts: 1,
-              lastPractisedAt: "2026-05-19T10:00:00.000Z",
-              nextDueAt: "2026-05-19T10:00:00.000Z",
-              intervalDays: 1,
-              recentSessionIds: ["smoke-seed"],
+          methods: {
+            "hormozi-sales-2026@1.0.0-beta.3": {
+              methodPack: {
+                id: "hormozi-sales-2026",
+                version: "1.0.0-beta.3",
+              },
+              skills: {
+                hard_no_clean_exit: {
+                  score: 4,
+                  confidence: 0.5,
+                  attempts: 1,
+                  lastPractisedAt: "2026-05-19T10:00:00.000Z",
+                  nextDueAt: "2026-05-19T10:00:00.000Z",
+                  intervalDays: 1,
+                  recentSessionIds: ["smoke-seed"],
+                },
+              },
             },
           },
         },
@@ -85,9 +94,14 @@ async function main() {
     const page = await browser.newPage();
     await page.goto(`${baseUrl}/app?smoke=1`, { waitUntil: "networkidle" });
     await page.getByText("Due Drill").waitFor({ timeout: 5000 });
+    await page.getByRole("button", { name: "Profile" }).click();
+    const coachingMethod = page.getByLabel("Coaching method");
+    await coachingMethod.waitFor({ timeout: 5000 });
+    assert.equal(await coachingMethod.inputValue(), "hormozi-sales-2026");
+    assert.match(await coachingMethod.locator("option:checked").textContent(), /Hormozi/i);
     await page.getByRole("button", { name: "Start Call" }).click();
     await page.getByPlaceholder("Type what you would say on the call...").fill(
-      "James from Solar Future Scotland. Can I take 20 seconds?",
+      "Ava from Northstar Energy. Can I take 20 seconds?",
     );
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByText("Customer replied.").waitFor({ timeout: 5000 });
@@ -107,7 +121,7 @@ async function main() {
       await page.getByRole("button", { name: "Send" }).click();
     }
     await page.getByText("Gauntlet complete").waitFor({ timeout: 5000 });
-    console.log("Smoke passed: due drill, retrieval Help, next drill, review queue, and gauntlet.");
+    console.log("Smoke passed: method selector, due drill, retrieval Help, next drill, review queue, and gauntlet.");
   } catch (error) {
     console.error(logs.join(""));
     throw error;

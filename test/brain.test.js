@@ -642,6 +642,25 @@ test("messy routing openers are treated as right-person questions", async () => 
   }
 });
 
+test("asset ownership is not treated as a right-person check by the opening flow guard", () => {
+  const repMessage =
+    "James from Tradesites calling about solar suitability; do you own the site or lease the building?";
+  const reply = require("../src/brain").buildConversationFlowGuard({
+    scenario: enterpriseScenario,
+    session: {
+      id: "enterprise-asset-ownership-boundary",
+      scenarioId: enterpriseScenario.id,
+      turns: [
+        { role: "persona", text: enterpriseScenario.persona.openingLine },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.notEqual(reply?.flowGuard, "right_person_check");
+});
+
 test("right-person opener can vary the routing answer", async () => {
   const repMessage =
     "this is James regarding a quick electricity cost check, are you the right person to talk to about this?";

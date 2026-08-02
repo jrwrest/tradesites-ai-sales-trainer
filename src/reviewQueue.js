@@ -1,12 +1,21 @@
 const { hasHardNo } = require("./objectionPlaybook");
+const { defaultMethodPackPin } = require("./methodPack");
 
 function numericSkillScores(session) {
   return Object.entries(session.evaluation?.skillScores || {})
     .filter(([skill, score]) => skill !== "schemaVersion" && typeof score === "number");
 }
 
-function buildReviewQueue(sessions) {
-  const ended = sessions
+function sessionsForMethod(sessions, methodPack) {
+  if (!methodPack) return sessions;
+  return sessions.filter((session) => {
+    const pin = session.methodPack || session.evaluation?.methodPack || defaultMethodPackPin();
+    return pin && pin.id === methodPack.id && pin.version === methodPack.version;
+  });
+}
+
+function buildReviewQueue(sessions, methodPack = null) {
+  const ended = sessionsForMethod(sessions, methodPack)
     .filter((session) => session.status === "ended" && session.evaluation)
     .sort((a, b) => String(a.endedAt || a.startedAt || "").localeCompare(String(b.endedAt || b.startedAt || "")));
   const missedCounts = new Map();
@@ -52,9 +61,9 @@ function buildReviewQueue(sessions) {
     .filter(Boolean);
 }
 
-function buildSkillTrends(sessions) {
+function buildSkillTrends(sessions, methodPack = null) {
   const values = new Map();
-  for (const session of sessions) {
+  for (const session of sessionsForMethod(sessions, methodPack)) {
     for (const [skill, score] of numericSkillScores(session)) {
       const list = values.get(skill) || [];
       list.push(score);
@@ -72,4 +81,5 @@ function buildSkillTrends(sessions) {
 module.exports = {
   buildReviewQueue,
   buildSkillTrends,
+  sessionsForMethod,
 };

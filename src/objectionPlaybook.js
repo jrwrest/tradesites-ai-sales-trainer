@@ -6,7 +6,7 @@ const enterpriseObjectionPlaybook = {
     "Validate the objection, label the concern, then ask a smaller secondary question.",
     "Encourage/question, confirm understanding, address, and check.",
     "For larger sales, avoid early pitching; use problem and implication questions before solution claims.",
-    "SFS guardrails: keep it low-pressure, classify correctly, use small next steps, and cleanly exit on hard no.",
+    "Trainer guardrails: keep it low-pressure, classify correctly, use small next steps, and cleanly exit on hard no.",
   ],
   objections: [
     {
@@ -21,7 +21,7 @@ const enterpriseObjectionPlaybook = {
         "Ask for permission to take 20 seconds, then give them an easy out.",
       ],
       tryThis:
-        "Fair question. It is James from Solar Future Scotland. The reason for the call is a quick check on whether funded commercial solar is even relevant for this site. If it is not, I can close it off. Can I take 20 seconds?",
+        "Fair question. It is {repName} from {companyName}. The reason for the call is a quick check on whether funded commercial solar is even relevant for this site. If it is not, I can close it off. Can I take 20 seconds?",
     },
     {
       id: "send-info",
@@ -176,7 +176,7 @@ const manufacturerPowerPaybackPlaybook = {
         "Ask permission for one relevant question.",
       ],
       tryThis:
-        "Fair question. It is James from Solar Future Scotland. I am not calling to pitch an install today. We build a short Power Payback Report for manufacturers to see whether solar, PPA, battery, or tariff options are worth a proper look. Can I ask one quick question to see if it is even relevant?",
+        "Fair question. It is {repName} from {companyName}. I am not calling to pitch an install today. We build a short Power Payback Report for manufacturers to see whether solar, PPA, battery, or tariff options are worth a proper look. Can I ask one quick question to see if it is even relevant?",
     },
     {
       id: "power-payback-already-have-panels",
@@ -421,7 +421,7 @@ function buildCoachingSuggestion({ scenario, session }) {
         "Give them an easy out if the site is not a fit.",
       ],
       tryThis:
-        "It is James from Solar Future Scotland. I am calling about a Power Payback Report for manufacturers. If your electricity spend is not high enough, I can close it off. Can I take 20 seconds?",
+        "It is {repName} from {companyName}. I am calling about a Power Payback Report for manufacturers. If your electricity spend is not high enough, I can close it off. Can I take 20 seconds?",
     },
     permission: {
       title: "Ask one gate question",

@@ -9,7 +9,7 @@ const {
   validateProductionConfig,
   validateServerConfig,
 } = require("../src/server");
-const { updateSkillMemory } = require("../src/skillMemory");
+const { loadSkillMemory, updateSkillMemory } = require("../src/skillMemory");
 
 let server;
 let baseUrl;
@@ -107,7 +107,7 @@ test("serves scenarios and health", async () => {
   assert.equal(typeof health.body.runtime.requests.total, "number");
   assert.deepEqual(health.body.methodPack, {
     id: "hormozi-sales-2026",
-    version: "1.0.0-beta.2",
+    version: "1.0.0-beta.3",
     status: "source-grounded-beta",
   });
 
@@ -376,6 +376,10 @@ test("production config requires auth, retention, explicit single-instance stora
     () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_DATA_POLICY_ACK: "0" } }),
     /OPENCLAW_DATA_POLICY_ACK must be 1/,
   );
+  assert.throws(
+    () => validateProductionConfig({ env: { ...openClawBase, OPENCLAW_GATEWAY_TIMEOUT_MS: "45000" } }),
+    /OPENCLAW_GATEWAY_TIMEOUT_MS must be a positive integer no greater than 40000/,
+  );
 });
 
 test("typed call happy path persists turns and scores", async () => {
@@ -388,7 +392,7 @@ test("typed call happy path persists turns and scores", async () => {
   assert.equal(created.body.session.repId, "local");
   assert.deepEqual(created.body.session.methodPack, {
     id: "hormozi-sales-2026",
-    version: "1.0.0-beta.2",
+    version: "1.0.0-beta.3",
   });
   assert.equal(created.body.session.turns.length, 1);
   assert.equal(created.body.session.turns[0].role, "persona");
@@ -599,6 +603,12 @@ test("gauntlet session persists round results and summary", async () => {
   assert.equal(current.status, "ended");
   assert.equal(current.gauntlet.results.length, 3);
   assert.equal(typeof current.gauntlet.summary.weakestFamily, "string");
+  assert.deepEqual(current.evaluation.methodPack, current.methodPack);
+  assert.equal(current.methodDrill?.behaviorId, current.evaluation.methodEvaluation.assignedDrill?.behaviorId);
+  const memory = await loadSkillMemory("local");
+  const namespace = memory.methods[`${current.methodPack.id}@${current.methodPack.version}`];
+  assert.ok(namespace);
+  assert.ok(Object.keys(namespace.skills).length > 0);
 });
 
 test("gauntlet endpoint uses selected manufacturer report scenario", async () => {

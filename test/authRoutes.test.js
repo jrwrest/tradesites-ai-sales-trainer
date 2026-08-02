@@ -6,6 +6,7 @@ const { afterEach, beforeEach, test } = require("node:test");
 const { createApp } = require("../src/server");
 const { createFixedWindowRateLimiter } = require("../src/rateLimit");
 const { loadSkillMemory, saveSkillMemory } = require("../src/skillMemory");
+const { profilePath } = require("../src/profileStore");
 
 let previousDataDir;
 let tempDataDir;
@@ -129,6 +130,7 @@ test("auth-required mode rejects anonymous trainer routes", async () => {
   await withServer(app, async (request) => {
     const routes = [
       ["/api/drills/due", {}],
+      ["/api/methods", {}],
       ["/api/review-queue", {}],
       ["/api/sessions", { method: "POST", body: JSON.stringify({ scenarioId: "enterprise-commercial-solar" }) }],
       ["/api/gauntlets", { method: "POST", body: JSON.stringify({ rounds: 3 }) }],
@@ -141,6 +143,29 @@ test("auth-required mode rejects anonymous trainer routes", async () => {
       assert.equal(result.response.status, 401, route);
       assert.equal(result.body.code, "auth_required", route);
     }
+  });
+});
+
+test("authenticated reps can list the closed coaching method registry", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    const anonymous = await request("/api/methods");
+    assert.equal(anonymous.response.status, 401);
+
+    const result = await request("/api/methods", { headers: authHeader("token-a") });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.body.methods, [
+      {
+        id: "hormozi-sales-2026",
+        version: "1.0.0-beta.3",
+        displayName: "Hormozi Sales Operating Method — 2026 Talk Adaptation",
+        status: "source-grounded-beta",
+      },
+    ]);
   });
 });
 
@@ -380,6 +405,7 @@ test("profile endpoints return and save the current rep profile", async () => {
     assert.equal(loaded.response.status, 200);
     assert.equal(loaded.body.profile.repId, "rep-a");
     assert.equal(loaded.body.profile.companyName, "BrightTrade Solar");
+    assert.equal(loaded.body.profile.coachingMethodId, "hormozi-sales-2026");
 
     const saved = await request("/api/profile", {
       method: "PUT",
@@ -389,6 +415,7 @@ test("profile endpoints return and save the current rep profile", async () => {
           repName: "Alex Morgan",
           companyName: "BrightTrade Solar",
           callGoal: "Book useful commercial solar follow-ups.",
+          coachingMethodId: "hormozi-sales-2026",
         },
       }),
     });
@@ -396,6 +423,278 @@ test("profile endpoints return and save the current rep profile", async () => {
     assert.equal(saved.body.profile.repId, "rep-a");
     assert.equal(saved.body.profile.repName, "Alex Morgan");
     assert.equal(saved.body.profile.callGoal, "Book useful commercial solar follow-ups.");
+    assert.equal(saved.body.profile.coachingMethodId, "hormozi-sales-2026");
+
+    for (const coachingMethodId of ["missing-pack", "../data"]) {
+      const rejected = await request("/api/profile", {
+        method: "PUT",
+        headers: authHeader("token-a"),
+        body: JSON.stringify({ profile: { coachingMethodId } }),
+      });
+      assert.equal(rejected.response.status, 400);
+      assert.equal(rejected.body.code, "invalid_coaching_method");
+    }
+  });
+});
+
+test("sessions and gauntlets pin the profile-selected method id and registry version", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    const saved = await request("/api/profile", {
+      method: "PUT",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ profile: { coachingMethodId: "hormozi-sales-2026" } }),
+    });
+    assert.equal(saved.response.status, 200);
+
+    const call = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    const gauntlet = await request("/api/gauntlets", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report", rounds: 3 }),
+    });
+
+    assert.equal(call.response.status, 201);
+    assert.equal(gauntlet.response.status, 201);
+    assert.deepEqual(call.body.session.methodPack, {
+      id: "hormozi-sales-2026",
+      version: "1.0.0-beta.3",
+    });
+    assert.deepEqual(gauntlet.body.session.methodPack, call.body.session.methodPack);
+  });
+});
+
+test("active session coaching and scoring use the session pin after profile changes", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    const created = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    assert.equal(created.response.status, 201);
+
+    await fs.mkdir(path.dirname(profilePath("rep-a")), { recursive: true });
+    await fs.writeFile(profilePath("rep-a"), JSON.stringify({
+      schemaVersion: 2,
+      repId: "rep-a",
+      repName: "Changed Rep",
+      companyName: "Changed Company",
+      coachingMethodId: "missing-after-session-start",
+    }));
+
+    const coached = await request(`/api/sessions/${created.body.session.id}/coach`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ selectedMove: "ask_permission" }),
+    });
+    assert.equal(coached.response.status, 200);
+    assert.deepEqual(
+      {
+        id: coached.body.suggestion.methodMetadata.id,
+        version: coached.body.suggestion.methodMetadata.version,
+      },
+      created.body.session.methodPack,
+    );
+
+    const ended = await request(`/api/sessions/${created.body.session.id}/end`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+    });
+    assert.equal(ended.response.status, 200);
+    assert.deepEqual(ended.body.session.evaluation.methodPack, created.body.session.methodPack);
+  });
+});
+
+test("beta.2 sessions retain legacy coaching while new sessions use beta.3 method coaching", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    const legacy = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    const current = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    const legacyPath = path.join(tempDataDir, "sessions", `${legacy.body.session.id}.json`);
+    const persisted = JSON.parse(await fs.readFile(legacyPath, "utf8"));
+    persisted.methodPack.version = "1.0.0-beta.2";
+    await fs.writeFile(legacyPath, `${JSON.stringify(persisted, null, 2)}\n`);
+
+    await request("/api/profile", {
+      method: "PUT",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({
+        profile: {
+          repName: "Changed Rep",
+          companyName: "Changed Company",
+          coachingMethodId: "hormozi-sales-2026",
+        },
+      }),
+    });
+
+    const legacyCoach = await request(`/api/sessions/${legacy.body.session.id}/coach`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ selectedMove: "ask_permission" }),
+    });
+    const currentCoach = await request(`/api/sessions/${current.body.session.id}/coach`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ selectedMove: "ask_permission" }),
+    });
+
+    assert.equal(legacyCoach.response.status, 200);
+    assert.equal(legacyCoach.body.suggestion.methodMetadata, undefined);
+    assert.equal(legacyCoach.body.suggestion.methodPrompt, undefined);
+    assert.equal(currentCoach.response.status, 200);
+    assert.equal(currentCoach.body.suggestion.methodMetadata.version, "1.0.0-beta.3");
+    assert.equal(typeof currentCoach.body.suggestion.methodPrompt, "string");
+
+    const legacyEnd = await request(`/api/sessions/${legacy.body.session.id}/end`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+    });
+    const currentEnd = await request(`/api/sessions/${current.body.session.id}/end`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+    });
+    assert.equal(legacyEnd.body.session.evaluation.methodPack.version, "1.0.0-beta.2");
+    assert.equal(currentEnd.body.session.evaluation.methodPack.version, "1.0.0-beta.3");
+  });
+});
+
+test("missing or mismatched active session method pins fail with stable method_unavailable", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    for (const [pin, route] of [
+      [{ id: "missing-pack", version: "1.0.0" }, "coach"],
+      [{ id: "hormozi-sales-2026", version: "0.0.0" }, "end"],
+    ]) {
+      const created = await request("/api/sessions", {
+        method: "POST",
+        headers: authHeader("token-a"),
+        body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+      });
+      const target = path.join(tempDataDir, "sessions", `${created.body.session.id}.json`);
+      const persisted = JSON.parse(await fs.readFile(target, "utf8"));
+      persisted.methodPack = pin;
+      await fs.writeFile(target, `${JSON.stringify(persisted, null, 2)}\n`);
+
+      const result = await request(`/api/sessions/${created.body.session.id}/${route}`, {
+        method: "POST",
+        headers: authHeader("token-a"),
+        body: route === "coach" ? JSON.stringify({ selectedMove: "ask_permission" }) : undefined,
+      });
+      assert.equal(result.response.status, 409, JSON.stringify(pin));
+      assert.equal(result.body.code, "method_unavailable", JSON.stringify(pin));
+      assert.equal(result.body.error, "The coaching method for this session is unavailable.");
+    }
+  });
+});
+
+test("legacy sessions without a method pin continue on the default method", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    const created = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    const target = path.join(tempDataDir, "sessions", `${created.body.session.id}.json`);
+    const persisted = JSON.parse(await fs.readFile(target, "utf8"));
+    delete persisted.methodPack;
+    await fs.writeFile(target, `${JSON.stringify(persisted, null, 2)}\n`);
+
+    const coached = await request(`/api/sessions/${created.body.session.id}/coach`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ selectedMove: "ask_permission" }),
+    });
+    assert.equal(coached.response.status, 200);
+    assert.deepEqual(coached.body.session.methodPack, {
+      id: "hormozi-sales-2026",
+      version: "1.0.0-beta.3",
+    });
+
+    const ended = await request(`/api/sessions/${created.body.session.id}/end`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+    });
+    assert.equal(ended.response.status, 200);
+    assert.deepEqual(ended.body.session.evaluation.methodPack, coached.body.session.methodPack);
+  });
+});
+
+test("coaching identifies the method/framework and personalizes only allowlisted identity fields", async () => {
+  const app = createApp({
+    authRequired: true,
+    authVerifier: async (token) => usersByToken[token],
+  });
+
+  await withServer(app, async (request) => {
+    await request("/api/profile", {
+      method: "PUT",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({
+        profile: {
+          repName: "Ava Chen",
+          companyName: "Northstar Energy",
+          coachingMethodId: "hormozi-sales-2026",
+          notes: "UNTRUSTED-NOTES-MARKER",
+          offer: "UNTRUSTED-OFFER-MARKER",
+        },
+      }),
+    });
+    const created = await request("/api/sessions", {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    const coached = await request(`/api/sessions/${created.body.session.id}/coach`, {
+      method: "POST",
+      headers: authHeader("token-a"),
+      body: JSON.stringify({ selectedMove: "ask_permission" }),
+    });
+
+    assert.equal(coached.response.status, 200);
+    assert.deepEqual(coached.body.suggestion.methodMetadata, {
+      id: "hormozi-sales-2026",
+      version: "1.0.0-beta.3",
+      displayName: "Hormozi Sales Operating Method — 2026 Talk Adaptation",
+      frameworkLabel: "Proof, Promise, Plan",
+    });
+    assert.match(coached.body.suggestion.tryThis, /Ava Chen/);
+    assert.match(coached.body.suggestion.tryThis, /Northstar Energy/);
+    assert.doesNotMatch(JSON.stringify(coached.body.suggestion), /James|Solar Future Scotland/);
+    assert.doesNotMatch(JSON.stringify(coached.body.suggestion), /UNTRUSTED-(?:NOTES|OFFER)-MARKER/);
   });
 });
 

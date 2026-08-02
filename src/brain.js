@@ -1,6 +1,6 @@
 const { spawn } = require("node:child_process");
 const { runOpenClawBrain } = require("./openclawGateway");
-const { buildDialogueReply } = require("./dialogueManager");
+const { buildDialogueReply, isRoutingQuestion } = require("./dialogueManager");
 const { hasHardNo, selectNextObjection } = require("./objectionPlaybook");
 
 const FALLBACKS = [
@@ -63,12 +63,6 @@ function hasPermissionAsk(text = "") {
   );
 }
 
-function hasRightPersonAsk(text = "") {
-  return /\b(best person|right person|someone better|better person|best (?:one|person) to (?:speak|talk|deal) with|right (?:one|person) to (?:speak|talk|deal) with|who (?:would be )?(?:best|better) to (?:speak|talk) (?:to|with)|who (?:looks after|handles|owns|deals with)|(?:do|would) you (?:look after|handle|own|cover|deal with)|are you (?:the )?(?:person|one)|would you be (?:the )?(?:person|one)|is this (?:something )?you (?:look after|handle|own|cover|deal with))\b/i.test(
-    text,
-  );
-}
-
 function isCleanExit(text = "") {
   return /\b(understood|i understand|no problem|all good|thanks|thank you|close (?:it|this) off|take you off|remove you|won't call|will not call|bye|goodbye)\b/i.test(
     text,
@@ -108,7 +102,7 @@ function buildConversationFlowGuard({ scenario, session, repMessage }) {
     };
   }
 
-  if (hasRightPersonAsk(repMessage)) {
+  if (isRoutingQuestion(repMessage)) {
     return {
       text: RIGHT_PERSON_REPLIES[stableIndex(`${session.id}:${repMessage}`, RIGHT_PERSON_REPLIES.length)],
       mood: "busy",
@@ -200,11 +194,12 @@ function buildObjectionFollowUpGuard({ session, repMessage }) {
   return null;
 }
 
-function fallbackWithWarning({ scenario, session, repMessage, code }) {
+function fallbackWithWarning({ scenario, session, repMessage, code, providerLatencyMs }) {
   return {
     ...mockReply({ scenario, session, repMessage }),
     warning: "AI provider unavailable; using mock customer.",
     warningCode: code,
+    providerLatencyMs,
   };
 }
 
@@ -300,6 +295,9 @@ function requiredTopicForReply(reply) {
   }
   if (reply.flowGuard === "right_person_check" || reply.dialogue?.customerAction === "answer_routing_question") {
     return "whether this is the right person or what the call is about";
+  }
+  if (reply.dialogue?.customerAction === "answer_asset_ownership") {
+    return "whether the physical site or building is owned, leased, or controlled";
   }
   if (reply.flowGuard === "energy_bill_qualification") {
     return "why the rep needs electricity usage or bill information";
@@ -400,6 +398,11 @@ function matchesRequiredAction(text, contract) {
   }
   if (contract.customerAction === "answer_routing_question") {
     return /\b(possibly|maybe|not directly|depends|right person|person|look after|handle|deal with|decision|energy|site|what did you send|what is this about|short version|point you|someone)\b/i.test(
+      normalized,
+    );
+  }
+  if (contract.customerAction === "answer_asset_ownership") {
+    return /\b(own|owned|ownership|lease|leased|site|building|premises|property|landlord|control)\b/i.test(
       normalized,
     );
   }
@@ -901,6 +904,7 @@ async function generateCustomerReply({ scenario, session, repMessage, renderProv
   const forcedObjection = payload.forcedObjection;
 
   if (process.env.OPENCLAW_GATEWAY_URL) {
+    const startedAt = Date.now();
     try {
       const reply = await runOpenClawBrain(payload);
       if (reply.text) {
@@ -911,7 +915,13 @@ async function generateCustomerReply({ scenario, session, repMessage, renderProv
         };
       }
     } catch (error) {
-      return fallbackWithWarning({ scenario, session, repMessage, code: "openclaw_unavailable" });
+      return fallbackWithWarning({
+        scenario,
+        session,
+        repMessage,
+        code: error.code === "OPENCLAW_TIMEOUT" ? "openclaw_timeout" : "openclaw_unavailable",
+        providerLatencyMs: Date.now() - startedAt,
+      });
     }
   }
 

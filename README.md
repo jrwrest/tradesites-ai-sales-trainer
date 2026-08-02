@@ -30,6 +30,7 @@ The public demo requires login. For self-hosted public deployments, disable open
 - Versioned, source-grounded PPP, BANT, CLOSER, three-pillar, and AAA evaluation with turn-level evidence and ethical gates.
 - Objection gauntlet mode for repeated high-pressure practice.
 - Local review queue and approved response examples.
+- Per-user, version-pinned coaching method selection; the bundled source-grounded Hormozi adaptation controls coaching, scoring, examples, and drills.
 - Pluggable customer brain: deterministic mock, OpenClaw gateway, or local command provider.
 - Local-first data storage with ignored transcript/profile/session files.
 
@@ -185,7 +186,7 @@ DIALOGUE_LLM_RENDER_TIMEOUT_MS=10000 \
 npm start
 ```
 
-Check `/api/health` before canarying. It should show `dialogueRendering.enabled`, `dialogueRendering.provider`, `dialogueRendering.timeoutMs`, concurrency limits, and render stats.
+Check `/api/health` before canarying. It shows the dialogue-render settings and stats plus the bounded OpenClaw turn timeout and provider outcome counters. `OPENCLAW_GATEWAY_TIMEOUT_MS` is a single wall-clock budget across connect, agent start, and reply wait, capped at 40000 ms; timeout returns the deterministic customer fallback.
 
 ## Test And Eval Commands
 
@@ -199,6 +200,7 @@ npm run validate:auth
 - `npm test` covers server routes, auth, scoring, scheduling, gauntlets, review queues, and flow guards.
 - `npm run eval:fixtures` checks fixed sales-call fixtures against score bands, assigned drills, and leakage strings.
 - Method calibration reports exact behavior agreement and quadratic weighted kappa; see [docs/method-evaluation.md](docs/method-evaluation.md).
+- Method selection, version retention, legacy migration, and learning-memory isolation are documented in [docs/coaching-methods.md](docs/coaching-methods.md).
 - `npm run smoke` launches Chromium against a temporary local server with mock provider and temp data.
 - `npm run validate:auth` checks a live PocketBase-backed login path.
 

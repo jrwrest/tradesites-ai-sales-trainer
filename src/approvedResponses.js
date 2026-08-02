@@ -39,7 +39,7 @@ const APPROVED_RESPONSES = [
     objectionId: "power-payback-is-this-solar-call",
     recommendedMove: "ask_permission",
     skill: "permission_ask",
-    text: "Fair question. It is James from Solar Future Scotland. I am not calling to pitch an install today. We build a Power Payback Report for manufacturers. Can I ask one quick question to see if it is even relevant?",
+    text: "Fair question. It is {repName} from {companyName}. I am not calling to pitch an install today. We build a Power Payback Report for manufacturers. Can I ask one quick question to see if it is even relevant?",
   },
   {
     objectionId: "power-payback-already-have-panels",
@@ -79,8 +79,8 @@ const APPROVED_RESPONSES = [
   },
 ];
 
-function findApprovedResponse({ objectionId, recommendedMove, skill }) {
-  return (
+function findApprovedResponse({ objectionId, recommendedMove, skill, methodPack, profile } = {}) {
+  const example = (
     APPROVED_RESPONSES.find(
       (example) =>
         example.objectionId === objectionId &&
@@ -89,10 +89,13 @@ function findApprovedResponse({ objectionId, recommendedMove, skill }) {
     APPROVED_RESPONSES.find((example) => skill && example.skill === skill) ||
     null
   );
+  if (!example || !methodPack || methodPack.manifest.id !== "hormozi-sales-2026") return example;
+  const { renderCoachingTemplate } = require("./methodCoaching");
+  return { ...example, text: renderCoachingTemplate(example.text, profile, methodPack) };
 }
 
-function findApprovedResponseForDrill(drill) {
-  return findApprovedResponse({ skill: drill?.skill });
+function findApprovedResponseForDrill(drill, options = {}) {
+  return findApprovedResponse({ skill: drill?.skill, ...options });
 }
 
 module.exports = {

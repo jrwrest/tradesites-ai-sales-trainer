@@ -1,5 +1,6 @@
 const state = {
   scenarios: [],
+  methods: [],
   scenario: null,
   session: null,
   recognition: null,
@@ -364,8 +365,17 @@ function renderCoaching(suggestion) {
   title.textContent = suggestion.title;
   const stage = document.createElement("p");
   stage.className = "muted";
-  stage.textContent = `Stage: ${suggestion.stage}`;
+  stage.textContent = suggestion.methodMetadata
+    ? `${suggestion.methodMetadata.frameworkLabel} · ${suggestion.methodMetadata.displayName}`
+    : `Stage: ${suggestion.stage}`;
   wrapper.append(title, stage);
+
+  if (suggestion.methodPrompt) {
+    const methodPrompt = document.createElement("p");
+    methodPrompt.className = "method-prompt";
+    methodPrompt.textContent = suggestion.methodPrompt;
+    wrapper.append(methodPrompt);
+  }
 
   if (suggestion.suggestionHidden) {
     const moves = document.createElement("div");
@@ -514,6 +524,26 @@ function renderProfile(profile) {
   profileField(form, profile, "opener", "Default opener", true);
   profileField(form, profile, "notes", "Notes", true);
 
+  const methodField = document.createElement("label");
+  methodField.className = "profile-field";
+  const methodLabel = document.createElement("span");
+  methodLabel.textContent = "Coaching method";
+  const methodSelect = document.createElement("select");
+  methodSelect.name = "coachingMethodId";
+  methodSelect.setAttribute("aria-label", "Coaching method");
+  state.methods.forEach((method) => {
+    const option = document.createElement("option");
+    option.value = method.id;
+    option.textContent = method.displayName;
+    option.selected = method.id === profile.coachingMethodId;
+    methodSelect.append(option);
+  });
+  const methodHelp = document.createElement("small");
+  methodHelp.className = "muted";
+  methodHelp.textContent = "This choice controls live coaching, scoring, examples, and assigned drills. The Alex Hormozi option is an independent source-grounded adaptation.";
+  methodField.append(methodLabel, methodSelect, methodHelp);
+  form.append(methodField);
+
   const button = document.createElement("button");
   button.type = "submit";
   button.textContent = "Save Profile";
@@ -605,6 +635,15 @@ async function loadScenarios() {
   renderScenario();
 }
 
+async function loadMethods() {
+  if (!state.user) {
+    state.methods = [];
+    return;
+  }
+  const payload = await api("/api/methods");
+  state.methods = payload.methods || [];
+}
+
 async function loadHealth() {
   const payload = await api("/api/health");
   state.authRequired = Boolean(payload.auth?.required);
@@ -653,7 +692,7 @@ async function authenticate() {
     storeAuth(payload.token, payload.user);
     elements.authPassword.value = "";
     setStatus(`Signed in as ${payload.user.name || payload.user.email}.`);
-    await loadDueDrill();
+    await Promise.all([loadMethods(), loadDueDrill()]);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -701,7 +740,7 @@ async function signup() {
     storeAuth(payload.token, payload.user);
     elements.authPassword.value = "";
     setStatus(`Account created for ${payload.user.name || payload.user.email}.`);
-    await loadDueDrill();
+    await Promise.all([loadMethods(), loadDueDrill()]);
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -875,6 +914,7 @@ async function requestProfile() {
   state.waiting = true;
   setButtons();
   try {
+    if (!state.methods.length) await loadMethods();
     const payload = await api("/api/profile");
     renderProfile(payload.profile);
     setStatus("Profile loaded.");
@@ -907,18 +947,7 @@ async function submitMessage() {
       if (state.session.status === "ended") {
         clearInterval(state.timerId);
         const summary = state.session.gauntlet.summary;
-        const average = Math.round(
-          state.session.gauntlet.results.reduce((total, item) => total + item.score, 0) /
-            state.session.gauntlet.results.length,
-        );
-        renderScore({
-          overallScore: average,
-          categories: Object.fromEntries(
-            summary.familyScores.map((item) => [item.family, Math.round(item.average)]),
-          ),
-          recommendedDrill: `Repeat the gauntlet and focus on ${summary.weakestFamily}.`,
-          missedOpportunities: [],
-        });
+        renderScore(state.session.evaluation);
         setStatus(`Gauntlet complete. Weakest family: ${summary.weakestFamily}.`);
         return;
       }
@@ -1012,6 +1041,7 @@ setupSpeech();
 loadHealth()
   .then(loadScenarios)
   .then(loadAuth)
+  .then(loadMethods)
   .then(loadDueDrill)
   .then(setButtons)
   .catch((error) => setStatus(error.message, true));

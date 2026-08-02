@@ -86,9 +86,10 @@ DIALOGUE_LLM_RENDER_RETRY_ON_VIOLATION=0
 DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_SESSION=1
 DIALOGUE_LLM_RENDER_MAX_CONCURRENT_PER_USER=2
 DIALOGUE_LLM_RENDER_MAX_CONCURRENT_GLOBAL=10
+OPENCLAW_GATEWAY_TIMEOUT_MS=40000
 ```
 
-Keep `DIALOGUE_LLM_RENDER_ENABLED=0` for normal production rollback. The render timeout should stay well below the general OpenClaw timeout so a single turn cannot freeze the trainer.
+Keep `DIALOGUE_LLM_RENDER_ENABLED=0` for normal production rollback. The render timeout should stay well below the general OpenClaw timeout. The 40000 ms OpenClaw value is one end-to-end provider deadline, not a fresh timeout for each gateway phase; expiry returns a deterministic customer reply with `openclaw_timeout`.
 
 ## Health Check
 

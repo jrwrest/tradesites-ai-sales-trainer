@@ -2,6 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { getDataDir } = require("./store");
 const { withKeyLock } = require("./keyLock");
+const { DEFAULT_METHOD_PACK_ID, listMethodPacks } = require("./methodPack");
 
 const PROFILE_FIELDS = [
   "repName",
@@ -29,7 +30,7 @@ function profilePath(repId = "local") {
 function defaultProfile(user = {}) {
   const repName = user.name && user.name !== "Rep" ? user.name : "Alex Morgan";
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repId: user.id || "local",
     repName,
     companyName: "BrightTrade Solar",
@@ -39,6 +40,7 @@ function defaultProfile(user = {}) {
     callGoal: "Earn permission, qualify fit, identify the decision process, and book a useful follow-up.",
     opener: `Hi, it's ${repName} from BrightTrade Solar. I'm calling about commercial solar for your site. Can I take 20 seconds?`,
     notes: "Keep the tone practical, low pressure, and useful. Respect hard no responses cleanly.",
+    coachingMethodId: DEFAULT_METHOD_PACK_ID,
     updatedAt: null,
   };
 }
@@ -49,13 +51,20 @@ function cleanField(value, maxLength = 800) {
 
 function normalizeProfile(input = {}, user = {}) {
   const base = defaultProfile(user);
+  const coachingMethodId = String(input.coachingMethodId || base.coachingMethodId);
+  if (!listMethodPacks().some((method) => method.id === coachingMethodId)) {
+    const error = new Error("Unknown coaching method");
+    error.code = "INVALID_COACHING_METHOD";
+    throw error;
+  }
   const profile = {
     ...base,
     ...Object.fromEntries(
       PROFILE_FIELDS.map((field) => [field, cleanField(input[field] ?? base[field])]),
     ),
-    schemaVersion: 1,
+    schemaVersion: 2,
     repId: user.id || input.repId || "local",
+    coachingMethodId,
     updatedAt: input.updatedAt || null,
   };
   return profile;

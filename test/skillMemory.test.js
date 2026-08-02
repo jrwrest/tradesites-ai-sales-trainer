@@ -7,6 +7,7 @@ const {
   getDueDrills,
   intervalDaysForScore,
   loadSkillMemory,
+  saveSkillMemory,
   skillMemoryPath,
   updateSkillMemory,
 } = require("../src/skillMemory");
@@ -55,7 +56,7 @@ test("updateSkillMemory persists skill scores with fixed next due dates", async 
   });
 
   const memory = await loadSkillMemory();
-  assert.equal(memory.schemaVersion, 1);
+  assert.equal(memory.schemaVersion, 2);
   assert.equal(memory.skills.permission_ask.intervalDays, 14);
   assert.equal(memory.skills.permission_ask.nextDueAt, "2026-06-03T10:00:00.000Z");
   assert.equal(memory.skills.hard_no_clean_exit.intervalDays, 1);
@@ -120,4 +121,129 @@ test("skill memory is stored and queried per rep", async () => {
   assert.deepEqual(dueB.map((drill) => drill.skill), ["hard_no_clean_exit"]);
   assert.notEqual(skillMemoryPath("rep/b"), skillMemoryPath("rep_b"));
   assert.match(skillMemoryPath("rep/b"), /skill-memory-[a-zA-Z0-9_-]+\.json$/);
+});
+
+test("skill memory namespaces the same skill by pinned method id and version", async () => {
+  const hormoziPin = { id: "hormozi-sales-2026", version: "1.0.0-beta.3" };
+  const futurePin = { id: "hormozi-sales-2026", version: "2.0.0" };
+
+  await updateSkillMemory({
+    session: { id: "session-v1", repId: "rep-a", methodPack: hormoziPin },
+    evaluation: { skillScores: { schemaVersion: 1, ppp_plan: 4 } },
+    now: new Date("2026-05-19T10:00:00.000Z"),
+  });
+  await updateSkillMemory({
+    session: { id: "session-v2", repId: "rep-a", methodPack: futurePin },
+    evaluation: { skillScores: { schemaVersion: 1, ppp_plan: 9 } },
+    now: new Date("2026-05-19T10:00:00.000Z"),
+  });
+
+  const memory = await loadSkillMemory("rep-a");
+  assert.equal(memory.schemaVersion, 2);
+  assert.deepEqual(memory.methods["hormozi-sales-2026@1.0.0-beta.3"].methodPack, hormoziPin);
+  assert.equal(memory.methods["hormozi-sales-2026@1.0.0-beta.3"].skills.ppp_plan.score, 4);
+  assert.deepEqual(memory.methods["hormozi-sales-2026@2.0.0"].methodPack, futurePin);
+  assert.equal(memory.methods["hormozi-sales-2026@2.0.0"].skills.ppp_plan.score, 9);
+});
+
+test("due drills return only the requested method namespace with its pin", async () => {
+  const selectedPin = { id: "hormozi-sales-2026", version: "1.0.0-beta.3" };
+  const otherPin = { id: "other-method", version: "1.0.0" };
+  const now = new Date("2026-05-19T10:00:00.000Z");
+
+  await updateSkillMemory({
+    session: { id: "selected-session", repId: "rep-a", methodPack: selectedPin },
+    evaluation: { skillScores: { schemaVersion: 1, ppp_plan: 4 } },
+    now,
+  });
+  await updateSkillMemory({
+    session: { id: "other-session", repId: "rep-a", methodPack: otherPin },
+    evaluation: { skillScores: { schemaVersion: 1, aaa_ask: 3 } },
+    now,
+  });
+
+  const due = await getDueDrills(
+    new Date("2026-05-21T10:00:00.000Z"),
+    "rep-a",
+    selectedPin,
+  );
+
+  assert.deepEqual(due.map((drill) => drill.skill), ["ppp_plan"]);
+  assert.deepEqual(due[0].methodPack, selectedPin);
+});
+
+test("legacy schema v1 memory stays in beta.2 while beta.3 starts isolated and replay-safe", async () => {
+  const legacyPin = { id: "hormozi-sales-2026", version: "1.0.0-beta.2" };
+  const currentPin = { id: "hormozi-sales-2026", version: "1.0.0-beta.3" };
+  await fs.writeFile(skillMemoryPath("legacy-rep"), `${JSON.stringify({
+    schemaVersion: 1,
+    repId: "legacy-rep",
+    skills: {
+      ppp_plan: {
+        score: 4,
+        confidence: 0.5,
+        attempts: 1,
+        lastPractisedAt: "2026-05-19T10:00:00.000Z",
+        nextDueAt: "2026-05-20T10:00:00.000Z",
+        intervalDays: 1,
+        recentSessionIds: ["legacy-session"],
+      },
+    },
+  }, null, 2)}\n`);
+
+  const memory = await loadSkillMemory("legacy-rep");
+  const legacySkills = memory.methods["hormozi-sales-2026@1.0.0-beta.2"].skills;
+  const currentSkills = memory.methods["hormozi-sales-2026@1.0.0-beta.3"].skills;
+  assert.equal(memory.schemaVersion, 2);
+  assert.equal(legacySkills.ppp_plan.attempts, 1);
+  assert.deepEqual(currentSkills, {});
+  assert.deepEqual(memory.skills, currentSkills, "compatibility callers should see the current namespace");
+
+  await saveSkillMemory(memory);
+  const afterMigrationSave = await loadSkillMemory("legacy-rep");
+  assert.equal(
+    afterMigrationSave.methods["hormozi-sales-2026@1.0.0-beta.2"].skills.ppp_plan.attempts,
+    1,
+  );
+  assert.deepEqual(
+    afterMigrationSave.methods["hormozi-sales-2026@1.0.0-beta.3"].skills,
+    {},
+  );
+
+  await updateSkillMemory({
+    session: { id: "current-session", repId: "legacy-rep", methodPack: currentPin },
+    evaluation: { skillScores: { schemaVersion: 1, ppp_plan: 4 } },
+    now: new Date("2026-05-20T10:00:00.000Z"),
+  });
+  await updateSkillMemory({
+    session: { id: "current-session", repId: "legacy-rep", methodPack: currentPin },
+    evaluation: { skillScores: { schemaVersion: 1, ppp_plan: 4 } },
+    now: new Date("2026-05-20T10:00:00.000Z"),
+  });
+  const afterReplay = await loadSkillMemory("legacy-rep");
+  assert.equal(
+    afterReplay.methods["hormozi-sales-2026@1.0.0-beta.3"].skills.ppp_plan.attempts,
+    1,
+    "current-version replay must not double-count the session",
+  );
+  assert.equal(
+    afterReplay.methods["hormozi-sales-2026@1.0.0-beta.2"].skills.ppp_plan.attempts,
+    1,
+    "beta.3 practice must not alter beta.2 history",
+  );
+
+  const legacyDue = await getDueDrills(
+    new Date("2026-05-22T10:00:00.000Z"),
+    "legacy-rep",
+    legacyPin,
+  );
+  const currentDue = await getDueDrills(
+    new Date("2026-05-22T10:00:00.000Z"),
+    "legacy-rep",
+    currentPin,
+  );
+  assert.equal(legacyDue.length, 1);
+  assert.deepEqual(legacyDue[0].methodPack, legacyPin);
+  assert.equal(currentDue.length, 1);
+  assert.deepEqual(currentDue[0].methodPack, currentPin);
 });

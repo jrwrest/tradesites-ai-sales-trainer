@@ -2,6 +2,12 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { getDataDir } = require("./store");
 const { withKeyLock } = require("./keyLock");
+const { defaultMethodPackPin } = require("./methodPack");
+
+const LEGACY_SCHEMA_V1_METHOD_PIN = Object.freeze({
+  id: "hormozi-sales-2026",
+  version: "1.0.0-beta.2",
+});
 
 function safeRepId(repId = "local") {
   return Buffer.from(String(repId || "local"), "utf8").toString("base64url");
@@ -12,10 +18,58 @@ function skillMemoryPath(repId = "local") {
 }
 
 function emptySkillMemory(repId = "local") {
+  const pin = defaultMethodPackPin();
+  const key = methodMemoryKey(pin);
+  const skills = {};
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repId,
-    skills: {},
+    methods: {
+      [key]: { methodPack: pin, skills },
+    },
+    skills,
+  };
+}
+
+function normalizeMethodPin(pin = defaultMethodPackPin()) {
+  const fallback = defaultMethodPackPin();
+  return {
+    id: String(pin?.id || fallback.id),
+    version: String(pin?.version || fallback.version),
+  };
+}
+
+function methodMemoryKey(pin = defaultMethodPackPin()) {
+  const normalized = normalizeMethodPin(pin);
+  return `${normalized.id}@${normalized.version}`;
+}
+
+function normalizeSkillMemory(parsed = {}, repId = "local") {
+  const defaultPin = defaultMethodPackPin();
+  const defaultKey = methodMemoryKey(defaultPin);
+  const legacyKey = methodMemoryKey(LEGACY_SCHEMA_V1_METHOD_PIN);
+  const methods = parsed.schemaVersion === 2 && parsed.methods && typeof parsed.methods === "object"
+    ? Object.fromEntries(Object.entries(parsed.methods).map(([key, value]) => [
+      key,
+      {
+        methodPack: normalizeMethodPin(value?.methodPack),
+        skills: value?.skills && typeof value.skills === "object" ? value.skills : {},
+      },
+    ]))
+    : {
+      [legacyKey]: {
+        methodPack: LEGACY_SCHEMA_V1_METHOD_PIN,
+        skills: parsed.skills && typeof parsed.skills === "object" ? parsed.skills : {},
+      },
+    };
+  if (!methods[defaultKey]) {
+    methods[defaultKey] = { methodPack: defaultPin, skills: {} };
+  }
+  return {
+    schemaVersion: 2,
+    repId,
+    methods,
+    skills: methods[defaultKey].skills,
   };
 }
 
@@ -38,12 +92,7 @@ async function loadSkillMemory(repId = "local") {
   try {
     const raw = await fs.readFile(skillMemoryPath(repId), "utf8");
     const parsed = JSON.parse(raw);
-    return {
-      ...emptySkillMemory(repId),
-      ...parsed,
-      repId,
-      skills: parsed.skills || {},
-    };
+    return normalizeSkillMemory(parsed, repId);
   } catch (error) {
     if (error.code === "ENOENT") return emptySkillMemory(repId);
     error.code = "SKILL_MEMORY_READ_FAILED";
@@ -54,9 +103,10 @@ async function loadSkillMemory(repId = "local") {
 async function saveSkillMemoryUnlocked(memory) {
   await fs.mkdir(getDataDir(), { recursive: true, mode: 0o700 });
   await fs.chmod(getDataDir(), 0o700);
-  const target = skillMemoryPath(memory.repId || "local");
+  const normalized = normalizeSkillMemory(memory, memory.repId || "local");
+  const target = skillMemoryPath(normalized.repId);
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(memory, null, 2)}\n`, { mode: 0o600 });
+  await fs.writeFile(temp, `${JSON.stringify(normalized, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temp, target);
   await fs.chmod(target, 0o600);
 }
@@ -70,10 +120,14 @@ async function updateSkillMemory({ session, evaluation, now = new Date() }) {
   const repId = session.repId || "local";
   return withKeyLock(`skill-memory:${repId}`, async () => {
     const memory = await loadSkillMemory(repId);
+    const methodPack = normalizeMethodPin(session.methodPack);
+    const namespaceKey = methodMemoryKey(methodPack);
+    const namespace = memory.methods[namespaceKey] || { methodPack, skills: {} };
+    memory.methods[namespaceKey] = namespace;
     const skillScores = evaluation.skillScores || {};
     for (const [skill, score] of Object.entries(skillScores)) {
       if (skill === "schemaVersion" || typeof score !== "number") continue;
-      const existing = memory.skills[skill] || {
+      const existing = namespace.skills[skill] || {
         score,
         confidence: 0.5,
         attempts: 0,
@@ -84,7 +138,7 @@ async function updateSkillMemory({ session, evaluation, now = new Date() }) {
         : [];
       const alreadyCounted = recentSessionIds.includes(session.id);
       const intervalDays = intervalDaysForScore(score);
-      memory.skills[skill] = {
+      namespace.skills[skill] = {
         score,
         confidence: Math.min(1, Math.max(0.1, (existing.confidence || 0.5) + (score >= 8 ? 0.05 : -0.03))),
         attempts: existing.attempts + (alreadyCounted ? 0 : 1),
@@ -96,6 +150,8 @@ async function updateSkillMemory({ session, evaluation, now = new Date() }) {
           : [...recentSessionIds.slice(-4), session.id],
       };
     }
+    const defaultKey = methodMemoryKey(defaultMethodPackPin());
+    memory.skills = memory.methods[defaultKey].skills;
     await saveSkillMemoryUnlocked(memory);
     return memory;
   });
@@ -113,9 +169,11 @@ async function deleteSkillMemory(repId = "local") {
   });
 }
 
-async function getDueDrills(now = new Date(), repId = "local") {
+async function getDueDrills(now = new Date(), repId = "local", methodPack = defaultMethodPackPin()) {
   const memory = await loadSkillMemory(repId);
-  return Object.entries(memory.skills)
+  const pin = normalizeMethodPin(methodPack);
+  const namespace = memory.methods[methodMemoryKey(pin)] || { skills: {} };
+  return Object.entries(namespace.skills)
     .filter(([, value]) => value.nextDueAt && new Date(value.nextDueAt) <= now)
     .map(([skill, value]) => ({
       schemaVersion: 1,
@@ -123,6 +181,7 @@ async function getDueDrills(now = new Date(), repId = "local") {
       score: value.score,
       nextDueAt: value.nextDueAt,
       reason: `Due for practice after scoring ${value.score}/10.`,
+      methodPack: pin,
     }))
     .sort((a, b) => {
       const scoreDelta = a.score - b.score;
@@ -136,6 +195,8 @@ module.exports = {
   deleteSkillMemory,
   intervalDaysForScore,
   loadSkillMemory,
+  methodMemoryKey,
+  normalizeSkillMemory,
   saveSkillMemory,
   safeRepId,
   skillMemoryPath,

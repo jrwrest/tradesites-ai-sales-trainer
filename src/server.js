@@ -13,6 +13,7 @@ const {
   getDialogueRenderTimeoutMs,
   isDialogueLlmRenderEnabled,
 } = require("./brain");
+const { getOpenClawStats, getOpenClawTimeoutMs } = require("./openclawGateway");
 const { scoreTranscript } = require("./scoring");
 const { deleteSkillMemory, getDueDrills, updateSkillMemory } = require("./skillMemory");
 const { generateGauntletPlan, scoreGauntletAnswer, scoreHardNoCleanExit, summarizeGauntlet } = require("./gauntlet");
@@ -41,7 +42,12 @@ const {
 } = require("./auth");
 const { sendEmail } = require("./email");
 const { installGracefulShutdown } = require("./shutdown");
-const { loadMethodPack } = require("./methodPack");
+const {
+  listMethodPacks,
+  loadMethodPack,
+  resolveMethodPack,
+} = require("./methodPack");
+const { applyMethodCoaching } = require("./methodCoaching");
 const { createFixedWindowRateLimiter } = require("./rateLimit");
 const { runRetention } = require("./retention");
 const { checkOpenClawGateway } = require("./openclawGateway");
@@ -136,6 +142,14 @@ function validateProductionConfig({ env = process.env } = {}) {
     }
     if (env.OPENCLAW_DATA_POLICY_ACK !== "1") {
       errors.push("OPENCLAW_DATA_POLICY_ACK must be 1");
+    }
+    if (
+      env.OPENCLAW_GATEWAY_TIMEOUT_MS !== undefined &&
+      (!Number.isInteger(Number(env.OPENCLAW_GATEWAY_TIMEOUT_MS)) ||
+        Number(env.OPENCLAW_GATEWAY_TIMEOUT_MS) <= 0 ||
+        Number(env.OPENCLAW_GATEWAY_TIMEOUT_MS) > 40000)
+    ) {
+      errors.push("OPENCLAW_GATEWAY_TIMEOUT_MS must be a positive integer no greater than 40000");
     }
   }
   if (errors.length) throw new Error(`Production config invalid: ${errors.join("; ")}`);
@@ -323,6 +337,11 @@ function createApp(options = {}) {
         maxConcurrentPerUser: getDialogueRenderMaxConcurrentPerUser(),
         maxConcurrentGlobal: getDialogueRenderMaxConcurrentGlobal(),
         stats: getDialogueRenderStats(),
+      },
+      openClaw: {
+        enabled: Boolean(process.env.OPENCLAW_GATEWAY_URL),
+        timeoutMs: getOpenClawTimeoutMs(),
+        stats: getOpenClawStats(),
       },
       auth: {
         required: authRequired,
@@ -665,6 +684,49 @@ function createApp(options = {}) {
     res.json({ user: req.user || LOCAL_USER, authRequired });
   });
 
+  function methodPackForProfile(profile) {
+    if (profile.coachingMethodId === methodPack.manifest.id) return methodPack;
+    return loadMethodPack(profile.coachingMethodId);
+  }
+
+  function resolveSessionMethodPack(session) {
+    if (!session.methodPack) {
+      session.methodPack = {
+        id: methodPack.manifest.id,
+        version: methodPack.manifest.version,
+      };
+      session.methodMigration = "legacy_default";
+      return methodPack;
+    }
+    if (
+      session.methodPack.id === methodPack.manifest.id
+      && session.methodPack.version === methodPack.manifest.version
+    ) {
+      return methodPack;
+    }
+    return resolveMethodPack(session.methodPack);
+  }
+
+  function coachingProfileForSession(session) {
+    return session.coachingProfile || {
+      repName: "the rep",
+      companyName: "their company",
+    };
+  }
+
+  app.get("/api/methods", (_req, res) => {
+    const methods = listMethodPacks();
+    if (!methods.some((item) => item.id === methodPack.manifest.id && item.version === methodPack.manifest.version)) {
+      methods.push({
+        id: methodPack.manifest.id,
+        version: methodPack.manifest.version,
+        displayName: methodPack.manifest.displayName,
+        status: methodPack.manifest.status,
+      });
+    }
+    res.json({ methods });
+  });
+
   app.delete("/api/account-data", async (req, res, next) => {
     try {
       if (String(req.body.confirmation || "") !== "DELETE MY TRAINING DATA") {
@@ -730,7 +792,12 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "invalid_now", "Bad request");
         return;
       }
-      const drills = await getDueDrills(now, req.user.id);
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const drills = await getDueDrills(now, req.user.id, {
+        id: selectedMethodPack.manifest.id,
+        version: selectedMethodPack.manifest.version,
+      });
       res.json({ drills });
     } catch (error) {
       next(error);
@@ -740,9 +807,15 @@ function createApp(options = {}) {
   app.get("/api/review-queue", async (_req, res, next) => {
     try {
       const sessions = await listSessions(_req.user.id);
+      const profile = await loadProfile(_req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const pin = {
+        id: selectedMethodPack.manifest.id,
+        version: selectedMethodPack.manifest.version,
+      };
       res.json({
-        queue: buildReviewQueue(sessions),
-        skillTrends: buildSkillTrends(sessions),
+        queue: buildReviewQueue(sessions, pin),
+        skillTrends: buildSkillTrends(sessions, pin),
       });
     } catch (error) {
       next(error);
@@ -752,14 +825,20 @@ function createApp(options = {}) {
   app.post("/api/sessions", async (req, res, next) => {
     try {
       const scenario = getScenario(req.body.scenarioId);
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
       const now = new Date().toISOString();
       const session = {
         id: crypto.randomUUID(),
         repId: req.user.id,
         scenarioId: scenario.id,
         methodPack: {
-          id: methodPack.manifest.id,
-          version: methodPack.manifest.version,
+          id: selectedMethodPack.manifest.id,
+          version: selectedMethodPack.manifest.version,
+        },
+        coachingProfile: {
+          repName: profile.repName,
+          companyName: profile.companyName,
         },
         status: "active",
         startedAt: now,
@@ -791,6 +870,8 @@ function createApp(options = {}) {
   app.post("/api/gauntlets", async (req, res, next) => {
     try {
       const scenario = getScenario(req.body.scenarioId || "enterprise-commercial-solar");
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
       const plan = generateGauntletPlan({
         rounds: Number(req.body.rounds || 5),
         playbookId: scenario.objectionPlaybookId,
@@ -802,8 +883,12 @@ function createApp(options = {}) {
         repId: req.user.id,
         scenarioId: scenario.id,
         methodPack: {
-          id: methodPack.manifest.id,
-          version: methodPack.manifest.version,
+          id: selectedMethodPack.manifest.id,
+          version: selectedMethodPack.manifest.version,
+        },
+        coachingProfile: {
+          repName: profile.repName,
+          companyName: profile.companyName,
         },
         status: "active",
         startedAt: now,
@@ -891,6 +976,7 @@ function createApp(options = {}) {
         dialogue: reply.dialogue,
         warning: reply.warning,
         warningCode: reply.warningCode,
+        providerLatencyMs: reply.providerLatencyMs,
         at: new Date().toISOString(),
       };
       session.turns.push(customerTurn);
@@ -926,6 +1012,7 @@ function createApp(options = {}) {
         sendApiError(req, res, 409, "session_not_active", "Session is not active");
         return;
       }
+      const sessionMethodPack = resolveSessionMethodPack(session);
 
       const now = new Date().toISOString();
       const round = session.gauntlet.plan.rounds[session.gauntlet.currentRound];
@@ -959,6 +1046,19 @@ function createApp(options = {}) {
         session.status = "ended";
         session.endedAt = now;
         session.gauntlet.summary = summarizeGauntlet(session.gauntlet.results);
+        session.evaluation = scoreTranscript({
+          scenario: getScenario(session.scenarioId),
+          turns: session.turns,
+          helpAttempts: session.helpAttempts || [],
+          methodPack: sessionMethodPack,
+        });
+        session.methodDrill = session.evaluation.methodEvaluation.assignedDrill;
+        session.assignedDrill = session.evaluation.assignedDrill;
+        session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill, {
+          methodPack: sessionMethodPack,
+          profile: coachingProfileForSession(session),
+        });
+        await updateSkillMemory({ session, evaluation: session.evaluation });
       }
 
       await saveSession(session);
@@ -971,17 +1071,21 @@ function createApp(options = {}) {
   app.post("/api/sessions/:id/end", async (req, res, next) => {
     try {
       const session = await loadOwnedSession(req, req.params.id);
+      const sessionMethodPack = resolveSessionMethodPack(session);
       session.status = "ended";
       session.endedAt = new Date().toISOString();
       session.evaluation = scoreTranscript({
         scenario: getScenario(session.scenarioId),
         turns: session.turns,
         helpAttempts: session.helpAttempts || [],
-        methodPack,
+        methodPack: sessionMethodPack,
       });
       session.methodDrill = session.evaluation.methodEvaluation.assignedDrill;
       session.assignedDrill = session.evaluation.assignedDrill;
-      session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill);
+      session.evaluation.approvedExample = findApprovedResponseForDrill(session.assignedDrill, {
+        methodPack: sessionMethodPack,
+        profile: coachingProfileForSession(session),
+      });
       await updateSkillMemory({ session, evaluation: session.evaluation });
       await saveSession(session);
       res.json({ session });
@@ -993,8 +1097,13 @@ function createApp(options = {}) {
   app.post("/api/sessions/:id/coach", async (req, res, next) => {
     try {
       const session = await loadOwnedSession(req, req.params.id);
+      const sessionMethodPack = resolveSessionMethodPack(session);
       const scenario = getScenario(session.scenarioId);
-      const suggestion = buildCoachingSuggestion({ scenario, session });
+      const suggestion = applyMethodCoaching({
+        suggestion: buildCoachingSuggestion({ scenario, session }),
+        methodPack: sessionMethodPack,
+        profile: coachingProfileForSession(session),
+      });
       const selectedMove = String(req.body.selectedMove || "").trim();
       if (!selectedMove) {
         res.json({
@@ -1006,6 +1115,7 @@ function createApp(options = {}) {
             prompt: "Choose your move before seeing the coaching suggestion.",
             moves: HELP_MOVES,
             suggestionHidden: true,
+            methodMetadata: suggestion.methodMetadata,
           },
         });
         return;
@@ -1031,6 +1141,8 @@ function createApp(options = {}) {
           approvedExample: findApprovedResponse({
             objectionId: suggestion.objectionId,
             recommendedMove: suggestion.recommendedMove,
+            methodPack: sessionMethodPack,
+            profile: coachingProfileForSession(session),
           }),
           suggestionHidden: false,
         },
@@ -1109,11 +1221,13 @@ function createApp(options = {}) {
     }
   });
 
-  app.post("/api/score", (req, res, next) => {
+  app.post("/api/score", async (req, res, next) => {
     try {
       const scenario = getScenario(req.body.scenarioId);
       const turns = Array.isArray(req.body.turns) ? req.body.turns : [];
-      res.json({ evaluation: scoreTranscript({ scenario, turns, methodPack }) });
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      res.json({ evaluation: scoreTranscript({ scenario, turns, methodPack: selectedMethodPack }) });
     } catch (error) {
       next(error);
     }
@@ -1148,6 +1262,14 @@ function createApp(options = {}) {
     }
     if (error.code === "SESSION_CONFLICT") {
       sendApiError(req, res, 409, "session_conflict", "Session changed; reload and try again");
+      return;
+    }
+    if (error.code === "INVALID_COACHING_METHOD") {
+      sendApiError(req, res, 400, "invalid_coaching_method", "Unknown coaching method");
+      return;
+    }
+    if (error.code === "METHOD_UNAVAILABLE") {
+      sendApiError(req, res, 409, "method_unavailable", "The coaching method for this session is unavailable.");
       return;
     }
     logger.error(

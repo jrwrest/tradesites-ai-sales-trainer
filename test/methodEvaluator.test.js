@@ -16,7 +16,7 @@ test("unobserved behaviors score zero with low confidence instead of a neutral d
   assert.equal(clarify.evidence.length, 0);
   assert.equal(clarify.counterEvidence.length, 0);
   assert.equal(evaluation.methodPack.id, "hormozi-sales-2026");
-  assert.equal(evaluation.methodPack.version, "1.0.0-beta.2");
+  assert.equal(evaluation.methodPack.version, "1.0.0-beta.3");
 });
 
 test("strong sales conversation produces turn-level evidence across the core frameworks", () => {

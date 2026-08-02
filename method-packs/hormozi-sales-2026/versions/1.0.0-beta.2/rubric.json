@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "scoreScale": [
+    { "score": 0, "label": "Not observed", "definition": "No transcript evidence; do not infer competence." },
+    { "score": 1, "label": "Harmful", "definition": "Counter-evidence or an ethical breach materially harms the call." },
+    { "score": 2, "label": "Attempted", "definition": "The behavior is attempted but incomplete, generic, or poorly timed." },
+    { "score": 3, "label": "Effective", "definition": "Clear transcript evidence achieves the behavior's job." },
+    { "score": 4, "label": "Adaptive", "definition": "Strong evidence is tailored, concise, verified, and advances the prospect's decision." }
+  ],
+  "stageWeights": [
+    { "stageId": "open", "weight": 10 },
+    { "stageId": "diagnose", "weight": 22 },
+    { "stageId": "qualify", "weight": 18 },
+    { "stageId": "present", "weight": 16 },
+    { "stageId": "ask", "weight": 8 },
+    { "stageId": "resolve", "weight": 18 },
+    { "stageId": "reinforce", "weight": 8 }
+  ],
+  "criticalGates": [
+    {
+      "id": "respect_hard_no", "label": "Respect an explicit hard no", "sourceRefs": ["sales_behavior"],
+      "failEvidence": ["continues persuasion after an unambiguous terminal no"],
+      "effect": { "capOverallScore": 39, "requiredDrillBehaviorId": "hard_no_clean_exit" }
+    },
+    {
+      "id": "truthful_claims", "label": "Use truthful claims and proof", "sourceRefs": ["before_sale", "sales_behavior"],
+      "failEvidence": ["fabricated proof, scarcity, guarantee, compliance reason, or customer outcome"],
+      "effect": { "capOverallScore": 20, "requiredHumanReview": true }
+    },
+    {
+      "id": "respect_real_authority", "label": "Respect real authority and procurement", "sourceRefs": ["before_sale", "closing"],
+      "failEvidence": ["pressures the contact to violate an actual approval requirement"],
+      "effect": { "capOverallScore": 39, "requiredDrillBehaviorId": "bant_authority" }
+    },
+    {
+      "id": "fit_before_commitment", "label": "Verify fit before commitment", "sourceRefs": ["before_sale", "sales_behavior"],
+      "failEvidence": ["asks for commitment after evidence that the prospect cannot benefit"],
+      "effect": { "capOverallScore": 20, "requiredHumanReview": true }
+    }
+  ],
+  "confidence": {
+    "minimumRepTurnsPerStage": 1,
+    "high": "direct evidence and counter-evidence checked in two or more relevant turns",
+    "medium": "direct evidence in one relevant turn",
+    "low": "ambiguous, incomplete, or stage not reached",
+    "rule": "Unobserved behavior scores zero with low confidence; it never receives a neutral default."
+  }
+}

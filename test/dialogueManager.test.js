@@ -58,6 +58,61 @@ test("dialogue manager answers a mid-call best-person question before scheduling
   assert.doesNotMatch(reply.text, /already have solar|multiple sites|different leases/i);
 });
 
+test("site ownership is discovery, not decision-maker routing", async () => {
+  const session = {
+    id: "dialogue-manager-site-ownership",
+    scenarioId: enterpriseScenario.id,
+    turns: [
+      { role: "persona", text: enterpriseScenario.persona.openingLine },
+      { role: "user", text: "James from Tradesites, calling about commercial solar suitability." },
+      { role: "persona", text: "Okay. What do you need to know?" },
+    ],
+  };
+
+  for (const repMessage of [
+    "Do you own the site?",
+    "Does the business own or lease this building?",
+    "Do you control the premises, or is there a landlord?",
+  ]) {
+    const classification = classifyRepTurn({ scenario: enterpriseScenario, session, repMessage });
+    assert.equal(classification.label, "discovery_question", repMessage);
+    assert.equal(classification.discoveryTopic, "asset_ownership", repMessage);
+
+    const reply = await generateCustomerReply({ scenario: enterpriseScenario, session, repMessage });
+    assert.equal(reply.provider, "dialogue_manager", repMessage);
+    assert.equal(reply.dialogue?.repAct, "asset_ownership_question", repMessage);
+    assert.equal(reply.dialogue?.customerAction, "answer_asset_ownership", repMessage);
+    assert.equal(reply.dialogue?.schedulerBlocked, true, repMessage);
+    assert.doesNotMatch(reply.text, /not directly.*what is this about|point you anywhere|short version/i, repMessage);
+    assert.match(reply.text, /own|lease|site|building|premises|landlord/i, repMessage);
+  }
+});
+
+test("decision ownership remains routing while asset ownership does not", () => {
+  const session = {
+    id: "dialogue-manager-ownership-boundary",
+    scenarioId: enterpriseScenario.id,
+    turns: [{ role: "persona", text: "Okay, go ahead." }],
+  };
+
+  assert.equal(
+    classifyRepTurn({
+      scenario: enterpriseScenario,
+      session,
+      repMessage: "Who owns the energy decision and budget?",
+    }).label,
+    "routing_question",
+  );
+  assert.equal(
+    classifyRepTurn({
+      scenario: enterpriseScenario,
+      session,
+      repMessage: "Do you own the building?",
+    }).label,
+    "discovery_question",
+  );
+});
+
 test("dialogue manager keeps existing-solar follow-up on the same objection", async () => {
   const repMessage =
     "if you've already got solar that's great we can also check that you're maximizing your solar to get the most of it is that something that would help you";
