@@ -301,6 +301,7 @@ function createApp(options = {}) {
   });
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
   const customerReplyRenderProvider = options.customerReplyRenderProvider;
+  const customerReplyPrimaryProvider = options.customerReplyPrimaryProvider;
   const methodPack = options.methodPack || loadMethodPack();
   const logger = options.logger || defaultLogger();
   const verifiedSignupNotifier = options.verifiedSignupNotifier
@@ -1127,6 +1128,7 @@ function createApp(options = {}) {
         session,
         repMessage: text,
         renderProvider: customerReplyRenderProvider,
+        primaryProvider: customerReplyPrimaryProvider,
       });
       const customerTurn = {
         id: crypto.randomUUID(),
@@ -1383,6 +1385,7 @@ function createApp(options = {}) {
         session,
         repMessage: text,
         renderProvider: customerReplyRenderProvider,
+        primaryProvider: customerReplyPrimaryProvider,
       });
       res.json({ reply });
     } catch (error) {

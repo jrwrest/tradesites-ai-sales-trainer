@@ -88,14 +88,25 @@ function answersLandlordObjection(text = "") {
 }
 
 function isPermissionAsk(text = "") {
-  return /\b(can i|could i|may i|do you have|have you got|we got|would it be okay|take|spare|give me|quick question|20 seconds|twenty seconds|30 seconds|thirty seconds|half a minute|briefly)\b/i.test(
-    text,
+  const normalized = String(text || "");
+  return (
+    /\b(?:can|could|may)\s+i\b/i.test(normalized)
+    || /\bwould\s+(?:it\s+be\s+(?:okay|ok|alright|all right)|you\s+be\s+opposed)\b/i.test(normalized)
+    || /\bdid\s+i\s+catch\s+you\s+at\s+(?:a\s+)?bad\s+time\b/i.test(normalized)
+    || /\b(?:do\s+you\s+have|have\s+you\s+got|can\s+you\s+spare|give\s+me|take)\s+(?:a|one|two|couple\s+of|few|\d+|twenty|thirty|half\s+a)\s*(?:seconds?|minutes?|moment)\b/i.test(normalized)
   );
 }
 
 function isDiscoveryQuestion(text = "") {
-  return /\b(how much|what(?:'s| is| are)|do you have|are you|is there|who handles|who owns|when do you|where do you|why do you|can you share|could you tell|roughly|ballpark)\b/i.test(
-    text,
+  const normalized = String(text || "");
+  if (isPermissionAsk(normalized)) return false;
+  return (
+    /\?\s*$/.test(normalized)
+    || /\b(?:how much|what)\s+(?:do|does|did|are|is|was|were|have|has|would|could|can)\s+(?:you|your|the\s+site|this\s+site)\b/i.test(normalized)
+    || /\b(?:do|does|did|are|is|can|could|would)\s+you\b/i.test(normalized)
+    || /\b(?:who|when|where|why)\s+(?:do|does|did|are|is|would|could|can)\b/i.test(normalized)
+    || /\b(?:who handles|who owns|can you share|could you tell)\b/i.test(normalized)
+    || /\b(?:roughly|ballpark)\b[^.?!]{0,80}\b(?:spend|pay|cost|usage|rate|amount|above|below)\b/i.test(normalized)
   );
 }
 
@@ -402,5 +413,6 @@ module.exports = {
   buildDialogueReply,
   classifyRepTurn,
   isAssetOwnershipQuestion,
+  isPermissionAsk,
   isRoutingQuestion,
 };

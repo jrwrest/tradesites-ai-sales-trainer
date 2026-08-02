@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { afterEach, beforeEach, test } = require("node:test");
 const { generateCustomerReply } = require("../src/brain");
-const { classifyRepTurn } = require("../src/dialogueManager");
+const { classifyRepTurn, isPermissionAsk } = require("../src/dialogueManager");
 const { getScenario } = require("../src/scenarios");
 
 const enterpriseScenario = getScenario("enterprise-commercial-solar");
@@ -22,6 +22,65 @@ beforeEach(() => {
 });
 
 afterEach(clearBrainEnv);
+
+test("permission asks require an actual request for time or consent", () => {
+  for (const text of [
+    "Would you be opposed to a couple of quick questions?",
+    "Did I catch you at a bad time?",
+    "Can I take 20 seconds?",
+    "Can I ask a quick question?",
+    "Do you have a minute?",
+  ]) {
+    assert.equal(isPermissionAsk(text), true, text);
+  }
+
+  for (const text of [
+    "You can take the report anywhere.",
+    "We give you a clear action plan.",
+    "Do you have panels on the roof?",
+    "Quick question: do you already have solar panels on the roof?",
+    "The assessment takes two days.",
+  ]) {
+    assert.equal(isPermissionAsk(text), false, text);
+  }
+});
+
+test("take anywhere inside a value explanation is not a permission ask", () => {
+  const repMessage =
+    "because you will get it back and you decide to go ahead with us and it'll give you a clear action plan that you can take anywhere to anyone and they'll be able to help you out";
+
+  const classification = classifyRepTurn({
+    scenario: manufacturerScenario,
+    session: {
+      id: "a29ae25f-take-anywhere",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: "Why would we pay GBP 500 for a report?", objectionId: "power-payback-why-pay" },
+      ],
+    },
+    repMessage,
+  });
+
+  assert.notEqual(classification.label, "permission_ask");
+});
+
+test("a savings and refund explanation is neither discovery nor a permission ask", () => {
+  const repMessage =
+    "it would tell us how your side is how much power you could potentially save and give we don't show you that you can save at least 10% on your bill then you will get a refund from us";
+
+  const classification = classifyRepTurn({
+    scenario: manufacturerScenario,
+    session: {
+      id: "a29ae25f-savings-refund",
+      scenarioId: manufacturerScenario.id,
+      turns: [{ role: "persona", text: "Alright, keep it brief. What would the report actually tell us?" }],
+    },
+    repMessage,
+  });
+
+  assert.notEqual(classification.label, "discovery_question");
+  assert.notEqual(classification.label, "permission_ask");
+});
 
 test("dialogue manager answers a mid-call best-person question before scheduling objections", async () => {
   const repMessage =

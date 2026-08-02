@@ -1,6 +1,11 @@
 const assert = require("node:assert/strict");
 const { test, beforeEach, afterEach } = require("node:test");
-const { generateCustomerReply, parseCommandLine } = require("../src/brain");
+const {
+  buildBrainPayload,
+  buildQualificationFlowGuard,
+  generateCustomerReply,
+  parseCommandLine,
+} = require("../src/brain");
 const { getScenario } = require("../src/scenarios");
 
 function clearBrainEnv() {
@@ -26,6 +31,9 @@ const enterpriseScenario = getScenario("enterprise-commercial-solar");
 const hardRejectionScenario = getScenario("commercial-solar-rejection");
 const manufacturerScenario = getScenario("manufacturer-power-payback-report");
 
+const escapedSavingsRefundMessage =
+  "it would tell us how your side is how much power you could potentially save and give we don't show you that you can save at least 10% on your bill then you will get a refund from us";
+
 function session(turns = []) {
   return {
     id: "test",
@@ -33,6 +41,264 @@ function session(turns = []) {
     turns,
   };
 }
+
+test("savings and refund explanation does not trigger energy bill qualification", () => {
+  const reply = buildQualificationFlowGuard({ repMessage: escapedSavingsRefundMessage });
+  assert.equal(reply, null);
+});
+
+test("manufacturer brain offers unused contextual objections instead of forcing one", () => {
+  const payload = buildBrainPayload({
+    scenario: manufacturerScenario,
+    session: {
+      id: "a29ae25f-contextual-objections",
+      scenarioId: manufacturerScenario.id,
+      state: { objectionsUsed: ["power-payback-no-bill"] },
+      turns: [
+        { role: "persona", text: manufacturerScenario.persona.openingLine },
+        { role: "user", text: "I am from solar and stove at least have you heard of us" },
+        {
+          role: "persona",
+          text: "We might already have panels on the roof.",
+          objectionId: "power-payback-already-have-panels",
+          objectionType: "existing_solution",
+        },
+        { role: "user", text: escapedSavingsRefundMessage },
+      ],
+    },
+    repMessage: escapedSavingsRefundMessage,
+  });
+
+  assert.equal(Object.hasOwn(payload, "forcedObjection"), false);
+  assert.ok(Array.isArray(payload.contextualObjections));
+  assert.equal(
+    payload.contextualObjections.some((objection) => objection.id === "power-payback-already-have-panels"),
+    false,
+  );
+  assert.equal(
+    payload.contextualObjections.some((objection) => objection.id === "power-payback-no-bill"),
+    false,
+  );
+  assert.ok(payload.contextualObjections.every((objection) => objection.type !== "hard_no"));
+  assert.ok(payload.contextualObjections.length <= 8);
+  assert.equal(Object.hasOwn(payload.responseSchema, "objectionId"), true);
+});
+
+test("unguarded turns use the injectable primary provider with the complete transcript", async () => {
+  const transcript = [
+    { role: "persona", text: "Stuart speaking. Who is this?" },
+    { role: "user", text: "hey this is James" },
+    { role: "persona", text: "James who? And what company are you with?" },
+    { role: "user", text: "I am from solar and stove at least have you heard of us" },
+    { role: "persona", text: "We might already have panels on the roof.", objectionId: "power-payback-already-have-panels" },
+    { role: "user", text: "what's your position are you the best person to talk to about solo" },
+    { role: "persona", text: "Probably not the best person for solar. What exactly are you calling about?" },
+    { role: "user", text: "I'm going to see if there are any hidden gaps in your current power situation" },
+    { role: "persona", text: "Why would we pay GBP 500 for a report?", objectionId: "power-payback-why-pay" },
+    { role: "user", text: "because you will get it back and you decide to go ahead with us and it'll give you a clear action plan that you can take anywhere to anyone and they'll be able to help you out" },
+    { role: "persona", text: "Alright, keep it brief. What would the report actually tell us?" },
+    { role: "user", text: escapedSavingsRefundMessage },
+  ];
+  const calls = [];
+
+  const reply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: { id: "a29ae25f", scenarioId: manufacturerScenario.id, turns: transcript },
+    repMessage: escapedSavingsRefundMessage,
+    primaryProvider: async (payload) => {
+      calls.push(payload);
+      return { text: "How is the 10% saving calculated?", mood: "skeptical", provider: "test-primary" };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].transcript, transcript);
+  assert.equal(Object.hasOwn(calls[0], "forcedObjection"), false);
+  assert.equal(reply.text, "How is the 10% saving calculated?");
+  assert.equal(reply.provider, "test-primary");
+});
+
+test("primary-provider objection metadata is scenario-bound and type is server-derived", async () => {
+  const baseSession = {
+    id: "provider-objection-validation",
+    scenarioId: manufacturerScenario.id,
+    turns: [
+      { role: "persona", text: "Okay. What exactly are you proposing?" },
+      { role: "user", text: "The report is a paid check before deciding what to do." },
+    ],
+  };
+  const repMessage = baseSession.turns[1].text;
+
+  const accepted = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: baseSession,
+    repMessage,
+    primaryProvider: async () => ({
+      text: "Why should we pay GBP 500 for that?",
+      mood: "skeptical",
+      provider: "test-primary",
+      objectionId: "power-payback-why-pay",
+      objectionType: "hard_no",
+    }),
+  });
+  assert.equal(accepted.objectionId, "power-payback-why-pay");
+  assert.equal(accepted.objectionType, "commercial_risk");
+
+  for (const objectionId of ["landlord", "power-payback-already-have-panels"]) {
+    const sessionWithUsed = {
+      ...baseSession,
+      turns: [
+        { role: "persona", text: "We might already have panels.", objectionId: "power-payback-already-have-panels" },
+        { role: "user", text: repMessage },
+      ],
+    };
+    const dropped = await generateCustomerReply({
+      scenario: manufacturerScenario,
+      session: sessionWithUsed,
+      repMessage,
+      primaryProvider: async () => ({
+        text: "Tell me more about that.",
+        provider: "test-primary",
+        objectionId,
+        objectionType: "hard_no",
+      }),
+    });
+    assert.equal(Object.hasOwn(dropped, "objectionId"), false, objectionId);
+    assert.equal(Object.hasOwn(dropped, "objectionType"), false, objectionId);
+  }
+});
+
+test("safety guards run before the injectable primary provider", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  let calls = 0;
+  const primaryProvider = async () => {
+    calls += 1;
+    return { text: "provider should not run", provider: "test-primary" };
+  };
+  const cases = [
+    {
+      session: { id: "guard-context", turns: [{ role: "persona", text: "Stuart speaking. Who is this?" }, { role: "user", text: "hey this is James" }] },
+      repMessage: "hey this is James",
+    },
+    {
+      session: { id: "guard-routing", turns: [{ role: "persona", text: "What is this about?" }, { role: "user", text: "are you the best person to talk to about solar" }] },
+      repMessage: "are you the best person to talk to about solar",
+    },
+    {
+      session: { id: "guard-hard-no", turns: [{ role: "persona", text: "Do not call again. Take us off your list." }, { role: "user", text: "Understood, goodbye." }] },
+      repMessage: "Understood, goodbye.",
+    },
+    {
+      session: { id: "guard-bill", turns: [{ role: "persona", text: "Okay, keep it brief." }, { role: "user", text: "roughly what do you spend on electricity each year?" }] },
+      repMessage: "roughly what do you spend on electricity each year?",
+    },
+  ];
+
+  for (const item of cases) {
+    await generateCustomerReply({ scenario: manufacturerScenario, ...item, primaryProvider });
+  }
+  assert.equal(calls, 0);
+});
+
+test("normal discovery questions reach the primary provider instead of narrow intent guards", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  const messages = [
+    "Quick question: do you already have solar panels on the roof?",
+    "Can you share how electricity cost affects your margins?",
+  ];
+  const calls = [];
+
+  for (const repMessage of messages) {
+    const reply = await generateCustomerReply({
+      scenario: manufacturerScenario,
+      session: {
+        id: `discovery-boundary-${calls.length}`,
+        scenarioId: manufacturerScenario.id,
+        turns: [
+          { role: "persona", text: "Okay, what would you like to know?" },
+          { role: "user", text: repMessage },
+        ],
+      },
+      repMessage,
+      primaryProvider: async (payload) => {
+        calls.push(payload.latestRepMessage);
+        return { text: "That is a fair question. Let me answer it directly.", provider: "test-primary" };
+      },
+    });
+    assert.equal(reply.provider, "test-primary", repMessage);
+  }
+
+  assert.deepEqual(calls, messages);
+
+  const routingMessage = "Do you know who handles the electricity bill?";
+  const routingReply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: {
+      id: "discovery-boundary-routing",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: "Okay, what would you like to know?" },
+        { role: "user", text: routingMessage },
+      ],
+    },
+    repMessage: routingMessage,
+    primaryProvider: async () => ({ text: "provider is not needed for deterministic routing" }),
+  });
+  assert.equal(routingReply.dialogue?.customerAction, "answer_routing_question");
+  assert.notEqual(routingReply.flowGuard, "energy_bill_qualification");
+  assert.doesNotMatch(routingReply.text, /exact figure|why do you need/i);
+});
+
+test("explicit quantitative questions outrank generic permission phrasing", async () => {
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  const messages = [
+    "How much is the electricity bill?",
+    "What's your annual electricity bill?",
+    "Can I ask how much you spend on electricity each year?",
+  ];
+
+  for (const repMessage of messages) {
+    let primaryCalls = 0;
+    const reply = await generateCustomerReply({
+      scenario: manufacturerScenario,
+      session: {
+        id: `quantitative-boundary-${repMessage.length}`,
+        scenarioId: manufacturerScenario.id,
+        turns: [
+          { role: "persona", text: "Okay, what would you like to know?" },
+          { role: "user", text: repMessage },
+        ],
+      },
+      repMessage,
+      primaryProvider: async () => {
+        primaryCalls += 1;
+        return { text: "primary provider should not run" };
+      },
+    });
+    assert.equal(reply.flowGuard, "energy_bill_qualification", repMessage);
+    assert.equal(primaryCalls, 0, repMessage);
+  }
+});
+
+test("invalid injectable primary replies fall back with an explicit warning", async () => {
+  const repMessage = "The report checks whether there is a worthwhile saving before you commit.";
+  for (const primaryProvider of [
+    async () => ({ text: "", provider: "test-primary" }),
+    async () => {
+      throw new Error("provider failed");
+    },
+  ]) {
+    const reply = await generateCustomerReply({
+      scenario: manufacturerScenario,
+      session: { id: "invalid-primary", turns: [{ role: "persona", text: "What would it tell us?" }, { role: "user", text: repMessage }] },
+      repMessage,
+      primaryProvider,
+    });
+    assert.equal(reply.warningCode, "primary_provider_unavailable");
+    assert.equal(typeof reply.text, "string");
+    assert.ok(reply.text.length > 0);
+  }
+});
 
 test("mock brain returns deterministic persona reply", async () => {
   const reply = await generateCustomerReply({
@@ -786,6 +1052,26 @@ test("energy qualification guard only responds to direct figure questions", asyn
       shouldTrigger: true,
     },
     {
+      message: "Could you share roughly what the annual electricity spend is?",
+      shouldTrigger: true,
+    },
+    {
+      message: "Do you know the monthly kWh usage?",
+      shouldTrigger: true,
+    },
+    {
+      message: "How much is the electricity bill?",
+      shouldTrigger: true,
+    },
+    {
+      message: "What's your annual electricity bill?",
+      shouldTrigger: true,
+    },
+    {
+      message: "Can I ask how much you spend on electricity each year?",
+      shouldTrigger: true,
+    },
+    {
       message: "we can check whether your electricity cost could be reduced",
       shouldTrigger: false,
     },
@@ -799,6 +1085,18 @@ test("energy qualification guard only responds to direct figure questions", asyn
     },
     {
       message: "the first step is seeing whether the site qualifies for a funded solar install",
+      shouldTrigger: false,
+    },
+    {
+      message: "your energy number keeps climbing, which is exactly what the report investigates",
+      shouldTrigger: false,
+    },
+    {
+      message: "Can you share how electricity cost affects your margins?",
+      shouldTrigger: false,
+    },
+    {
+      message: "Do you know who handles the electricity bill?",
       shouldTrigger: false,
     },
   ];
@@ -941,6 +1239,30 @@ test("command brain parses valid JSON reply", async () => {
   });
   assert.equal(reply.provider, "command");
   assert.equal(reply.text, "I can spare two minutes.");
+});
+
+test("command brain accepts only scenario-bound objection metadata", async () => {
+  process.env.CODEX_BRAIN_COMMAND = JSON.stringify([
+    process.execPath,
+    "-e",
+    "process.stdin.resume();process.stdin.on('end',()=>console.log(JSON.stringify({reply:'Why should we pay GBP 500 for that?',mood:'skeptical',objectionId:'power-payback-why-pay',objectionType:'hard_no'})))",
+  ]);
+  const repMessage = "The report is a paid check before deciding what to do.";
+  const reply = await generateCustomerReply({
+    scenario: manufacturerScenario,
+    session: {
+      id: "command-objection-validation",
+      scenarioId: manufacturerScenario.id,
+      turns: [
+        { role: "persona", text: "What are you proposing?" },
+        { role: "user", text: repMessage },
+      ],
+    },
+    repMessage,
+  });
+  assert.equal(reply.provider, "command");
+  assert.equal(reply.objectionId, "power-payback-why-pay");
+  assert.equal(reply.objectionType, "commercial_risk");
 });
 
 test("command brain falls back on invalid command", async () => {

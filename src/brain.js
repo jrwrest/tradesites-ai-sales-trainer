@@ -1,7 +1,7 @@
 const { spawn } = require("node:child_process");
 const { runOpenClawBrain } = require("./openclawGateway");
-const { buildDialogueReply, isRoutingQuestion } = require("./dialogueManager");
-const { hasHardNo, selectNextObjection } = require("./objectionPlaybook");
+const { buildDialogueReply, isPermissionAsk, isRoutingQuestion } = require("./dialogueManager");
+const { getPlaybook, hasHardNo, selectNextObjection } = require("./objectionPlaybook");
 
 const FALLBACKS = [
   "Can you make this quick? I have about two minutes.",
@@ -57,12 +57,6 @@ function hasEarlyCallContext(text = "") {
   );
 }
 
-function hasPermissionAsk(text = "") {
-  return /\b(can i|could i|may i|do you have|have you got|is now|would it be okay|take|spare|give me|quick question|20 seconds|twenty seconds|half a minute|briefly)\b/i.test(
-    text,
-  );
-}
-
 function isCleanExit(text = "") {
   return /\b(understood|i understand|no problem|all good|thanks|thank you|close (?:it|this) off|take you off|remove you|won't call|will not call|bye|goodbye)\b/i.test(
     text,
@@ -111,7 +105,7 @@ function buildConversationFlowGuard({ scenario, session, repMessage }) {
     };
   }
 
-  if (!hasPermissionAsk(repMessage)) {
+  if (!isPermissionAsk(repMessage)) {
     return {
       text: "Okay. Keep it brief. What is the relevance to us?",
       mood: "busy",
@@ -132,11 +126,15 @@ function asksForEnergyUsageFigure(text = "") {
     normalized,
   );
   const asksForFigure =
-    /\b(how much|what(?:'s| is| are)|what do you pay|roughly|approximately|estimate|estimated|ballpark|exact\s+figure|amount)\b/i.test(
-      normalized,
-    ) ||
-    /\b(can|could|would)\s+you\s+(?:share|tell|check|confirm|give|send)\b/i.test(normalized) ||
-    /\bdo\s+you\s+(?:know|have)\b/i.test(normalized);
+    /\b(?:how much|what)\s+(?:do|does|did|are|is|was|were|have|has|would|could|can)\s+(?:you|your|the\s+site|this\s+site)\b/i.test(normalized)
+    || /\bhow\s+much\s+(?:you|the\s+site|this\s+site)\s+(?:spend|pay|use|consume)\b/i.test(normalized)
+    || /\bhow\s+much\s+(?:is|was|does|did|would|could|can)\b[^.?!]{0,60}\b(?:electricity|energy|power|utility)\b[^.?!]{0,30}\b(?:bill|spend|cost|usage|rate|amount)\b/i.test(normalized)
+    || /\bwhat(?:'s|\s+is)\s+(?:your|the|this)\b[^.?!]{0,60}\b(?:annual|yearly|monthly|quarterly|bill|spend|usage|kwh|kilowatt|unit rate|rate|amount)\b/i.test(normalized)
+    || /\bhow much\s+(?:daytime\s+)?(?:energy|electricity|power|usage)\s+(?:do|does|did|is|was|would|could|can)\s+(?:you|your|the\s+site|this\s+site)\b/i.test(normalized)
+    || /\b(?:can|could|would)\s+you\s+(?:share|tell|check|confirm|give|send)\b[^.?!]{0,80}\b(?:how much|figure|amount|roughly|approximately|ballpark|annual|yearly|monthly|quarterly|kwh|kilowatt|unit rate|rate|above|below)\b/i.test(normalized)
+    || /\bdo\s+you\s+(?:know|have)\b[^.?!]{0,80}\b(?:how much|figure|amount|roughly|approximately|ballpark|annual|yearly|monthly|quarterly|kwh|kilowatt|unit rate|rate|above|below)\b/i.test(normalized)
+    || /\b(?:roughly|approximately|ballpark),?\s+(?:what|how|do|does|is|are|would|could|can)\b/i.test(normalized)
+    || /\b(?:are\s+you|is\s+(?:your|the\s+site))\b[^.?!]{0,50}\b(?:above|below)\b/i.test(normalized);
 
   return hasEnergyTopic && hasUsageMetric && asksForFigure;
 }
@@ -355,7 +353,7 @@ function buildDialogueRenderPayload({ scenario, session, repMessage, contract })
       "Reply only as the customer in a realistic cold-call training roleplay. Render one short, natural spoken reply that follows dialogueContract exactly. Answer or challenge the latest rep message directly. Do not jump to a different objection. Do not reveal that you are an AI.",
     scenario,
     sessionId: session.id,
-    transcript: session.turns,
+    transcript: session.turns.map((turn) => ({ ...turn })),
     latestRepMessage: repMessage,
     dialogueContract: contract,
     responseSchema: {
@@ -635,29 +633,55 @@ async function maybeRenderDialogueReply({ scenario, session, repMessage, reply, 
   }
 }
 
+function buildContextualObjections({ scenario, session }) {
+  const playbook = getPlaybook(scenario.objectionPlaybookId);
+  if (!playbook) return [];
+  const usedIds = new Set(
+    [
+      ...(session.state?.objectionsUsed || []),
+      ...(session.turns || []).map((turn) => turn.objectionId),
+    ].filter((value) => typeof value === "string" && value.length > 0),
+  );
+  const limit = Math.min(Math.max(Number(playbook.maxObjectionsPerCall) || 0, 0), 8);
+  return playbook.objections
+    .filter((objection) => !objection.terminal && !usedIds.has(objection.id))
+    .slice(0, limit)
+    .map((objection) => ({
+      id: objection.id,
+      type: objection.type,
+      stage: objection.stage,
+      text: objection.text,
+    }));
+}
+
 function buildBrainPayload({ scenario, session, repMessage }) {
-  const objection = selectNextObjection({ scenario, session, repMessage });
   return {
     instruction:
-      "Reply only as the customer in a realistic cold-call training roleplay. Keep the response spoken, short, and in character. Follow the transcript's immediate conversational state. Do not answer or volunteer discovery facts unless the latest rep message actually asked for that topic. If the latest rep message asks whether you are the right/best person or decision-maker, answer that routing question briefly first; you may be the right person, not the right person, or need clarification before routing them. If the latest rep message is a vague explanation, challenge or clarify that explanation instead of answering an unasked question. If the transcript already contains a hard no or take-us-off request, do not introduce new objections; if the rep exits cleanly, end politely, and if the rep pushes, repeat the hard no. If the rep has not explained who they are with and why they are calling, ask for that context instead of introducing a later objection. Do not reveal that you are an AI. If forcedObjection is present, your reply must express that objection and must not introduce a different company, industry, or objection.",
+      "Reply only as the customer in a realistic cold-call training roleplay. Keep the response spoken, short, and in character. Respond directly to the latest rep message and preserve the immediate conversational thread. Do not answer a question the rep did not ask. Do not introduce a new concern merely because it appears in contextualObjections. That catalog is optional context, not a sequence: use at most one objectionId only when the latest turn naturally raises that exact concern; otherwise return null. If the rep gives a vague explanation, ask what they mean. If an earlier concern remains unresolved, stay with it instead of jumping topics. If the transcript contains a hard no or take-us-off request, do not reopen the sale. Do not reveal that you are an AI.",
     scenario,
     sessionId: session.id,
-    transcript: session.turns,
+    transcript: session.turns.map((turn) => ({ ...turn })),
     latestRepMessage: repMessage,
-    forcedObjection: objection
-      ? {
-          id: objection.id,
-          type: objection.type,
-          stage: objection.stage,
-          text: objection.text,
-          terminal: objection.terminal === true,
-        }
-      : null,
+    contextualObjections: buildContextualObjections({ scenario, session }),
     responseSchema: {
       text: "string customer reply",
       mood: "short optional mood label",
+      objectionId: "nullable id from contextualObjections; null unless the reply naturally expresses it",
     },
   };
+}
+
+function applyValidatedObjectionMetadata(reply, payload) {
+  const normalized = { ...reply };
+  delete normalized.objectionId;
+  delete normalized.objectionType;
+  const requestedId = typeof reply?.objectionId === "string" ? reply.objectionId.trim() : "";
+  if (!requestedId) return normalized;
+  const allowed = (payload.contextualObjections || []).find((objection) => objection.id === requestedId);
+  if (!allowed) return normalized;
+  normalized.objectionId = allowed.id;
+  normalized.objectionType = allowed.type;
+  return normalized;
 }
 
 function mockReply({ scenario, session, repMessage }) {
@@ -861,11 +885,15 @@ function runCommandBrain(payload, options = {}) {
 
       try {
         const parsed = JSON.parse(trimmed);
-        resolve({
+        const reply = {
           text: String(parsed.text || parsed.reply || "").trim().slice(0, 1200),
           mood: parsed.mood || "unknown",
           provider: "command",
-        });
+        };
+        if (typeof parsed.objectionId === "string" && parsed.objectionId.trim()) {
+          reply.objectionId = parsed.objectionId.trim().slice(0, 120);
+        }
+        resolve(reply);
       } catch {
         resolve({
           text: trimmed.slice(0, 1200),
@@ -879,10 +907,12 @@ function runCommandBrain(payload, options = {}) {
   });
 }
 
-async function generateCustomerReply({ scenario, session, repMessage, renderProvider }) {
+async function generateCustomerReply({ scenario, session, repMessage, renderProvider, primaryProvider }) {
+  const qualificationGuard = buildQualificationFlowGuard({ repMessage });
   if (process.env.DIALOGUE_MANAGER_ENABLED === "1") {
     const dialogueReply = buildDialogueReply({ scenario, session, repMessage });
-    if (dialogueReply) {
+    const isGenericPermissionReply = dialogueReply?.dialogue?.repAct === "permission_ask";
+    if (dialogueReply && !(qualificationGuard && isGenericPermissionReply)) {
       return maybeRenderDialogueReply({ scenario, session, repMessage, reply: dialogueReply, renderProvider });
     }
   }
@@ -890,7 +920,6 @@ async function generateCustomerReply({ scenario, session, repMessage, renderProv
   const flowGuard = buildConversationFlowGuard({ scenario, session, repMessage });
   if (flowGuard) return maybeRenderDialogueReply({ scenario, session, repMessage, reply: flowGuard, renderProvider });
 
-  const qualificationGuard = buildQualificationFlowGuard({ repMessage });
   if (qualificationGuard) {
     return maybeRenderDialogueReply({ scenario, session, repMessage, reply: qualificationGuard, renderProvider });
   }
@@ -901,18 +930,36 @@ async function generateCustomerReply({ scenario, session, repMessage, renderProv
   }
 
   const payload = buildBrainPayload({ scenario, session, repMessage });
-  const forcedObjection = payload.forcedObjection;
+
+  if (typeof primaryProvider === "function") {
+    const startedAt = Date.now();
+    try {
+      const reply = await primaryProvider(payload);
+      if (reply?.text) return applyValidatedObjectionMetadata(reply, payload);
+      return fallbackWithWarning({
+        scenario,
+        session,
+        repMessage,
+        code: "primary_provider_unavailable",
+        providerLatencyMs: Date.now() - startedAt,
+      });
+    } catch {
+      return fallbackWithWarning({
+        scenario,
+        session,
+        repMessage,
+        code: "primary_provider_unavailable",
+        providerLatencyMs: Date.now() - startedAt,
+      });
+    }
+  }
 
   if (process.env.OPENCLAW_GATEWAY_URL) {
     const startedAt = Date.now();
     try {
       const reply = await runOpenClawBrain(payload);
       if (reply.text) {
-        return {
-          ...reply,
-          objectionId: forcedObjection?.id,
-          objectionType: forcedObjection?.type,
-        };
+        return applyValidatedObjectionMetadata(reply, payload);
       }
     } catch (error) {
       return fallbackWithWarning({
@@ -929,11 +976,7 @@ async function generateCustomerReply({ scenario, session, repMessage, renderProv
     try {
       const reply = await runCommandBrain(payload);
       if (reply.text) {
-        return {
-          ...reply,
-          objectionId: forcedObjection?.id,
-          objectionType: forcedObjection?.type,
-        };
+        return applyValidatedObjectionMetadata(reply, payload);
       }
     } catch (error) {
       return fallbackWithWarning({ scenario, session, repMessage, code: "command_unavailable" });

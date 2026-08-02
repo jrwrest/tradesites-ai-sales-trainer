@@ -279,6 +279,85 @@ test("API persists LLM-rendered dialogue metadata on customer turns", async () =
   }
 });
 
+test("manufacturer conversation replay follows the latest turn without canned objection jumps", async () => {
+  const previousDialogueManagerEnabled = process.env.DIALOGUE_MANAGER_ENABLED;
+  process.env.DIALOGUE_MANAGER_ENABLED = "1";
+  const providerCalls = [];
+  const replies = new Map([
+    ["I am from solar and stove at least have you heard of us", "No, I have not. What exactly does your company do?"],
+    ["I'm going to see if there are any hidden gaps in your current power situation", "What do you mean by hidden gaps in our power situation?"],
+    ["because you will get it back and you decide to go ahead with us and it'll give you a clear action plan that you can take anywhere to anyone and they'll be able to help you out", "How would that action plan help us make a decision?"],
+    ["it would tell us how your side is how much power you could potentially save and give we don't show you that you can save at least 10% on your bill then you will get a refund from us", "How would you demonstrate that the saving really reaches 10%?"],
+  ]);
+  const app = createApp({
+    authRequired: false,
+    customerReplyPrimaryProvider: async (payload) => {
+      providerCalls.push(payload);
+      return { text: replies.get(payload.latestRepMessage), mood: "guarded", provider: "test-primary" };
+    },
+  });
+  let localServer;
+  try {
+    await new Promise((resolve) => {
+      localServer = app.listen(0, "127.0.0.1", resolve);
+    });
+    const localBaseUrl = `http://127.0.0.1:${localServer.address().port}`;
+    const localRequest = async (pathName, options = {}) => {
+      const response = await fetch(`${localBaseUrl}${pathName}`, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      return { response, body: await response.json() };
+    };
+    const created = await localRequest("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ scenarioId: "manufacturer-power-payback-report" }),
+    });
+    const sessionId = created.body.session.id;
+    const messages = [
+      "hey this is James",
+      "I am from solar and stove at least have you heard of us",
+      "what's your position are you the best person to talk to about solo",
+      "I'm going to see if there are any hidden gaps in your current power situation",
+      "because you will get it back and you decide to go ahead with us and it'll give you a clear action plan that you can take anywhere to anyone and they'll be able to help you out",
+      "it would tell us how your side is how much power you could potentially save and give we don't show you that you can save at least 10% on your bill then you will get a refund from us",
+    ];
+    const customerReplies = [];
+    for (const text of messages) {
+      const result = await localRequest(`/api/sessions/${sessionId}/message`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      assert.equal(result.response.status, 200);
+      customerReplies.push(result.body.reply.text);
+    }
+
+    assert.ok(providerCalls.length >= 2);
+    for (const message of messages.slice(4)) {
+      assert.ok(
+        providerCalls.some((payload) => payload.latestRepMessage === message),
+        `expected primary provider call for: ${message}`,
+      );
+    }
+    assert.ok(providerCalls.every((payload) => !Object.hasOwn(payload, "forcedObjection")));
+    assert.ok(providerCalls.every((payload) => payload.transcript.at(-1).text === payload.latestRepMessage));
+    assert.match(customerReplies[0], /who|company|what.*about|from where/i);
+    assert.equal(customerReplies[4], "How would that action plan help us make a decision?");
+    assert.equal(customerReplies[5], "How would you demonstrate that the saving really reaches 10%?");
+    assert.doesNotMatch(customerReplies.join(" "), /already have panels|pay GBP 500|check the exact figure/i);
+
+    const loaded = await localRequest(`/api/sessions/${sessionId}`);
+    assert.deepEqual(loaded.body.session.state.objectionsUsed, ["gatekeeper-who-is-this"]);
+  } finally {
+    if (previousDialogueManagerEnabled === undefined) {
+      delete process.env.DIALOGUE_MANAGER_ENABLED;
+    } else {
+      process.env.DIALOGUE_MANAGER_ENABLED = previousDialogueManagerEnabled;
+    }
+    if (localServer) await new Promise((resolve) => localServer.close(resolve));
+  }
+});
+
 test("serves public home page", async () => {
   const response = await fetch(`${baseUrl}/`);
   const body = await response.text();
