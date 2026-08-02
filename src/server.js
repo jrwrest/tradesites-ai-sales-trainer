@@ -75,7 +75,11 @@ function validateServerConfig({ host = process.env.HOST || "127.0.0.1" } = {}) {
   }
 }
 
-function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = {}) {
+function validateApprovalModeConfig({
+  signupMode,
+  hasInjectedMailer = false,
+  hasInjectedNotifier = false,
+} = {}) {
   if (signupMode !== "approval") return;
   const missing = [];
   if (!process.env.PUBLIC_BASE_URL) missing.push("PUBLIC_BASE_URL");
@@ -85,6 +89,20 @@ function validateApprovalModeConfig({ signupMode, hasInjectedMailer = false } = 
       missing.push("SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY");
     }
     if (!process.env.MAIL_FROM && !process.env.SMTP_FROM) missing.push("MAIL_FROM or SMTP_FROM");
+  }
+  if (!hasInjectedNotifier) {
+    const approvalEmail = String(process.env.SIGNUP_APPROVAL_EMAIL || "").trim();
+    const hasTelegramBot = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+    const hasTelegramChat = Boolean(process.env.TELEGRAM_CHAT_ID);
+    const hasTelegram = hasTelegramBot && hasTelegramChat;
+    if (hasTelegramBot !== hasTelegramChat) {
+      missing.push("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured together");
+    }
+    if (!approvalEmail && !hasTelegram) {
+      missing.push("SIGNUP_APPROVAL_EMAIL or both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID");
+    } else if (approvalEmail && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(approvalEmail)) {
+      missing.push("SIGNUP_APPROVAL_EMAIL must be a valid email address");
+    }
   }
   if (missing.length) {
     const error = new Error(`Approval-mode signup is missing required config: ${missing.join(", ")}`);
@@ -263,12 +281,14 @@ function createApp(options = {}) {
   validateApprovalModeConfig({
     signupMode,
     hasInjectedMailer: Boolean(options.signupRequestMailer),
+    hasInjectedNotifier: Boolean(options.verifiedSignupNotifier),
   });
   const signupRequestMailer = options.signupRequestMailer || sendEmail;
-  const verifiedSignupNotifier = options.verifiedSignupNotifier || notifyVerifiedSignupRequest;
   const customerReplyRenderProvider = options.customerReplyRenderProvider;
   const methodPack = options.methodPack || loadMethodPack();
   const logger = options.logger || defaultLogger();
+  const verifiedSignupNotifier = options.verifiedSignupNotifier
+    || ((request) => notifyVerifiedSignupRequest(request, { mailer: signupRequestMailer, logger }));
   const startedAt = Date.now();
   const runtimeRequests = { total: 0, byStatus: {} };
   const readinessChecks = options.readinessChecks || defaultReadinessChecks({ authRequired });
@@ -520,13 +540,29 @@ function createApp(options = {}) {
   app.get("/api/signup-requests/:id/verify", async (req, res, next) => {
     try {
       const request = await verifySignupEmail(req.params.id, String(req.query.token || ""));
-      await verifiedSignupNotifier(request);
+      let notificationDelayed = false;
+      try {
+        const result = await verifiedSignupNotifier(request);
+        notificationDelayed = !result?.sent;
+      } catch (error) {
+        notificationDelayed = true;
+        logger.error({
+          event: "signup_approval_notification_failed",
+          requestId: request.id,
+          code: error.code || "SIGNUP_APPROVAL_NOTIFICATION_FAILED",
+          recoveryCommand: "npm run signup:resend-approval -- --email <applicant-email>",
+        });
+      }
+      res.setHeader("Cache-Control", "no-store");
       res.type("text/html").send([
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
         "<title>Email verified</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>",
         "<body><section class=\"auth-gate\"><div class=\"auth-card\"><h1>Email verified</h1>",
         "<p>Your email is verified. An admin will review the request and email you a password setup link after approval.</p>",
+        notificationDelayed
+          ? "<p>The admin notification is delayed, but your request is safely recorded.</p>"
+          : "",
         "</div></section></body></html>",
       ].join(""));
     } catch (error) {
@@ -600,7 +636,21 @@ function createApp(options = {}) {
         return;
       }
       const { request, passwordSetupToken } = await approveSignupRequest(req.params.id, approvalToken);
-      await sendPasswordSetupEmail(request, passwordSetupToken);
+      try {
+        await sendPasswordSetupEmail(request, passwordSetupToken);
+      } catch (error) {
+        logger.error({
+          event: "signup_password_email_failed",
+          requestId: request.id,
+          code: error.code || "EMAIL_DELIVERY_FAILED",
+          recoveryCommand: "npm run signup:resend-password -- --email <applicant-email>",
+        });
+        res.setHeader("Cache-Control", "no-store");
+        res.status(503).type("text/plain").send(
+          "Account approved, but the password setup email was not sent. Run the password-email recovery command.",
+        );
+        return;
+      }
       res.setHeader("Cache-Control", "no-store");
       res.type("text/plain").send(`${request.email} approved. Password setup email sent.`);
     } catch (error) {
@@ -1276,7 +1326,7 @@ function createApp(options = {}) {
       {
         level: "error",
         requestId: req.requestId,
-        route: req.originalUrl,
+        route: req.path,
         code: error.code || "internal_error",
         errorType: error.name || "Error",
       },

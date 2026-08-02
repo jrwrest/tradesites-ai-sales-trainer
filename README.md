@@ -81,8 +81,7 @@ To let visitors request access without creating accounts immediately, use approv
 SIGNUP_MODE=approval \
 PUBLIC_BASE_URL="https://trainer.example.com" \
 ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
-TELEGRAM_BOT_TOKEN="replace-with-your-bot-token" \
-TELEGRAM_CHAT_ID="replace-with-your-chat-id" \
+SIGNUP_APPROVAL_EMAIL="owner@example.com" \
 SMTP_HOST="smtp-relay.brevo.com" \
 SMTP_PORT="587" \
 SMTP_USER="replace-with-your-brevo-smtp-user" \
@@ -93,7 +92,19 @@ POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
 ```
 
-In approval mode, visitors enter only their email and click `Create Account`. The app sends a verification email. After the visitor verifies their email, Telegram receives an approval link. When you approve it, the app emails the visitor a password setup link. They set a password, then log in with email and password.
+In approval mode, visitors enter only their email and click `Create Account`. The app sends a verification email. After the visitor verifies their email, `SIGNUP_APPROVAL_EMAIL` receives an approval link. When you approve it, the app emails the visitor a password setup link. They set a password, then log in with email and password. Telegram remains an optional fallback when both Telegram values are configured. Removing `SIGNUP_APPROVAL_EMAIL` restores Telegram-only notifications only when both Telegram values are present; no data rollback is required.
+
+To rotate and resend a fresh admin approval link for an already-verified request without printing the link or token:
+
+```bash
+npm run signup:resend-approval -- --email applicant@example.com
+```
+
+If approval succeeded but the applicant's password email failed, rotate and resend that password link:
+
+```bash
+npm run signup:resend-password -- --email applicant@example.com
+```
 
 Validate the auth path:
 
@@ -132,12 +143,15 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `BREVO_API_KEY` | empty | Optional Brevo transactional API provider. SMTP is preferred when available. |
 | `RESEND_API_KEY` | empty | Optional fallback provider for approval-mode signup emails. |
 | `MAIL_FROM` | empty | Required for API providers. Can also override the SMTP sender display string. |
-| `TELEGRAM_BOT_TOKEN` | empty | Optional bot token for verified-signup approval notifications. |
-| `TELEGRAM_CHAT_ID` | empty | Optional chat id for verified-signup approval notifications. |
+| `SIGNUP_APPROVAL_EMAIL` | empty | Preferred admin recipient for verified-signup approval links. Required unless both Telegram fallback values are set. |
+| `TELEGRAM_BOT_TOKEN` | empty | Optional fallback bot token for verified-signup approval notifications. |
+| `TELEGRAM_CHAT_ID` | empty | Optional fallback chat id for verified-signup approval notifications. |
 | `SIGNUP_EMAIL_TOKEN_TTL_HOURS` | `24` | Email verification link lifetime. |
 | `SIGNUP_APPROVAL_TOKEN_TTL_HOURS` | `72` | Admin approval link lifetime. |
 | `SIGNUP_PASSWORD_TOKEN_TTL_HOURS` | `24` | Password setup link lifetime. |
 | `SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS` | `300` | Cooldown before a pending signup can resend/rotate a verification link. |
+| `EMAIL_DELIVERY_TIMEOUT_MS` | `10000` | Network timeout for SMTP and API email delivery. |
+| `SIGNUP_NOTIFICATION_TIMEOUT_MS` | `10000` | Per-channel timeout before admin notification fails or falls back. |
 | `OPENCLAW_GATEWAY_URL` | empty | Optional WebSocket gateway for OpenClaw-backed customer replies. |
 | `OPENCLAW_GATEWAY_TOKEN` | empty | Token for the OpenClaw gateway. |
 | `OPENCLAW_AGENT_ID` | `main` | OpenClaw agent to run. Production requires the dedicated `sales-trainer-customer` agent. |

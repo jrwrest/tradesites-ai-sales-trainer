@@ -9,7 +9,7 @@ These are generic self-hosting notes for Tradesites AI Sales Trainer. Keep live 
 - Run PocketBase on loopback or a private container network.
 - Set `AUTH_REQUIRED=1`.
 - Set `SIGNUP_MODE=disabled` or `SIGNUP_MODE=approval`; use `open` only if you intentionally want public account creation.
-- For controlled public access, use approval mode so visitors verify email first, then admins approve from Telegram, then the app sends a password setup link.
+- For controlled public access, use approval mode so visitors verify email first, then admins receive an email approval link, then the app sends a password setup link.
 - Use the mock brain for public demos unless you have quotas, rate limits, and abuse monitoring around model-backed providers.
 - Store transcripts in a private `DATA_DIR` outside the git checkout.
 - Run exactly one app process while using the JSON data store. Horizontal replicas require replacing it with a transactional database first.
@@ -45,6 +45,7 @@ SMTP_USER=replace-with-your-brevo-smtp-user
 SMTP_PASS=replace-with-your-brevo-smtp-password
 SMTP_FROM=trainer@example.com
 SMTP_FROM_NAME="Tradesites AI Sales Trainer"
+SIGNUP_APPROVAL_EMAIL=owner@example.com
 ```
 
 These are required when `SIGNUP_MODE=approval`; the app fails closed instead of logging signup links or telling users that email was sent when delivery is not configured.
@@ -56,14 +57,30 @@ SIGNUP_EMAIL_TOKEN_TTL_HOURS=24
 SIGNUP_APPROVAL_TOKEN_TTL_HOURS=72
 SIGNUP_PASSWORD_TOKEN_TTL_HOURS=24
 SIGNUP_EMAIL_RESEND_COOLDOWN_SECONDS=300
+EMAIL_DELIVERY_TIMEOUT_MS=10000
+SIGNUP_NOTIFICATION_TIMEOUT_MS=10000
 ```
 
-Optional Telegram approval notifications:
+Optional Telegram fallback approval notifications:
 
 ```bash
 TELEGRAM_BOT_TOKEN=replace-with-your-bot-token
 TELEGRAM_CHAT_ID=replace-with-your-chat-id
 ```
+
+Verified signup approval links are sent to `SIGNUP_APPROVAL_EMAIL`. If email delivery fails and both Telegram values are configured, the same one-time approval link is sent to Telegram as a fallback. To recover an already-verified request, rotate and resend its link without exposing it in terminal output:
+
+```bash
+npm run signup:resend-approval -- --email applicant@example.com
+```
+
+If the account is approved but password email delivery fails, rotate and resend a new password setup link:
+
+```bash
+npm run signup:resend-password -- --email applicant@example.com
+```
+
+Rollback is configuration-only: remove `SIGNUP_APPROVAL_EMAIL` and restart to return to Telegram-only notifications, but only after confirming both Telegram values are present. The recovery command supports either email or Telegram configuration, and no signup-request schema rollback is needed.
 
 Optional OpenClaw provider:
 

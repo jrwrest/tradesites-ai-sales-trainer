@@ -25,6 +25,9 @@ let previousSmtpHost;
 let previousSmtpUser;
 let previousSmtpPass;
 let previousSmtpFrom;
+let previousSignupApprovalEmail;
+let previousTelegramBotToken;
+let previousTelegramChatId;
 
 before(async () => {
   previousDataDir = process.env.DATA_DIR;
@@ -38,6 +41,9 @@ before(async () => {
   previousSmtpUser = process.env.SMTP_USER;
   previousSmtpPass = process.env.SMTP_PASS;
   previousSmtpFrom = process.env.SMTP_FROM;
+  previousSignupApprovalEmail = process.env.SIGNUP_APPROVAL_EMAIL;
+  previousTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  previousTelegramChatId = process.env.TELEGRAM_CHAT_ID;
   tempDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "tradesites-sales-trainer-test-"));
   process.env.DATA_DIR = tempDataDir;
   const app = createApp({ authRequired: false });
@@ -70,6 +76,9 @@ after(async () => {
     ["SMTP_USER", previousSmtpUser],
     ["SMTP_PASS", previousSmtpPass],
     ["SMTP_FROM", previousSmtpFrom],
+    ["SIGNUP_APPROVAL_EMAIL", previousSignupApprovalEmail],
+    ["TELEGRAM_BOT_TOKEN", previousTelegramBotToken],
+    ["TELEGRAM_CHAT_ID", previousTelegramChatId],
   ]) {
     if (value === undefined) {
       delete process.env[name];
@@ -294,10 +303,13 @@ test("approval mode requires public link, approval token, and email delivery con
   delete process.env.SMTP_USER;
   delete process.env.SMTP_PASS;
   delete process.env.SMTP_FROM;
+  delete process.env.SIGNUP_APPROVAL_EMAIL;
+  delete process.env.TELEGRAM_BOT_TOKEN;
+  delete process.env.TELEGRAM_CHAT_ID;
 
   assert.throws(
     () => validateApprovalModeConfig({ signupMode: "approval" }),
-    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY, MAIL_FROM or SMTP_FROM/,
+    /PUBLIC_BASE_URL, ACCESS_APPROVAL_TOKEN, SMTP_HOST, BREVO_API_KEY, or RESEND_API_KEY, MAIL_FROM or SMTP_FROM, SIGNUP_APPROVAL_EMAIL or both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID/,
   );
 
   process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
@@ -305,11 +317,35 @@ test("approval mode requires public link, approval token, and email delivery con
   assert.doesNotThrow(() => validateApprovalModeConfig({
     signupMode: "approval",
     hasInjectedMailer: true,
+    hasInjectedNotifier: true,
   }));
 
   process.env.SMTP_HOST = "smtp-relay.example.com";
   process.env.SMTP_FROM = "noreply@example.com";
+  process.env.SIGNUP_APPROVAL_EMAIL = "owner@example.com";
   assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
+
+  process.env.SIGNUP_APPROVAL_EMAIL = "not-an-email";
+  assert.throws(
+    () => validateApprovalModeConfig({ signupMode: "approval" }),
+    /SIGNUP_APPROVAL_EMAIL must be a valid email address/,
+  );
+  process.env.SIGNUP_APPROVAL_EMAIL = "owner@example.com";
+
+  process.env.SIGNUP_APPROVAL_EMAIL = "owner@example.com,other@example.com";
+  assert.throws(
+    () => validateApprovalModeConfig({ signupMode: "approval" }),
+    /SIGNUP_APPROVAL_EMAIL must be a valid email address/,
+  );
+  process.env.SIGNUP_APPROVAL_EMAIL = "owner@example.com";
+
+  process.env.TELEGRAM_BOT_TOKEN = "bot-token";
+  delete process.env.TELEGRAM_CHAT_ID;
+  assert.throws(
+    () => validateApprovalModeConfig({ signupMode: "approval" }),
+    /TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured together/,
+  );
+  delete process.env.TELEGRAM_BOT_TOKEN;
 
   delete process.env.SMTP_HOST;
   delete process.env.SMTP_FROM;
@@ -319,6 +355,11 @@ test("approval mode requires public link, approval token, and email delivery con
 
   delete process.env.BREVO_API_KEY;
   process.env.RESEND_API_KEY = "resend-secret";
+  assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
+
+  delete process.env.SIGNUP_APPROVAL_EMAIL;
+  process.env.TELEGRAM_BOT_TOKEN = "bot-token";
+  process.env.TELEGRAM_CHAT_ID = "chat-id";
   assert.doesNotThrow(() => validateApprovalModeConfig({ signupMode: "approval" }));
 });
 

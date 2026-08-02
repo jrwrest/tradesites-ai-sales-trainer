@@ -7,6 +7,7 @@ const { createApp } = require("../src/server");
 const { createFixedWindowRateLimiter } = require("../src/rateLimit");
 const { loadSkillMemory, saveSkillMemory } = require("../src/skillMemory");
 const { profilePath } = require("../src/profileStore");
+const { loadSignupRequests } = require("../src/signupRequests");
 
 let previousDataDir;
 let tempDataDir;
@@ -249,7 +250,7 @@ test("signup is disabled by default unless explicitly enabled", async () => {
   }
 });
 
-test("approval-mode signup verifies email before Telegram approval and password setup", async () => {
+test("approval-mode signup verifies email before admin approval and password setup", async () => {
   const previousSignupMode = process.env.SIGNUP_MODE;
   const previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
   const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
@@ -375,6 +376,165 @@ test("approval-mode signup verifies email before Telegram approval and password 
     } else {
       process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
     }
+  }
+});
+
+test("verified signup stays verified and emits a safe recovery signal when admin notification fails", async () => {
+  const previousSignupMode = process.env.SIGNUP_MODE;
+  const previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+  process.env.SIGNUP_MODE = "approval";
+  process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
+  process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
+  const emails = [];
+  const errors = [];
+  const app = createApp({
+    authRequired: true,
+    signupRequestMailer: async (message) => {
+      emails.push(message);
+      return { sent: true, channel: "test" };
+    },
+    verifiedSignupNotifier: async () => {
+      const error = new Error("provider included a sensitive detail");
+      error.code = "EMAIL_DELIVERY_FAILED";
+      throw error;
+    },
+    logger: { info() {}, error: (entry) => errors.push(entry) },
+  });
+
+  try {
+    await withServer(app, async (request) => {
+      const created = await request("/api/signup-requests", {
+        method: "POST",
+        body: JSON.stringify({ email: "delayed@example.com" }),
+      });
+      const verifyUrl = new URL(emails[0].text.match(/https:\/\/\S+/)[0]);
+      const verified = await request(`${verifyUrl.pathname}${verifyUrl.search}`);
+
+      assert.equal(created.response.status, 202);
+      assert.equal(verified.response.status, 200);
+      assert.equal((await loadSignupRequests())[0].status, "verified_pending_approval");
+      assert.deepEqual(errors, [{
+        event: "signup_approval_notification_failed",
+        requestId: created.body.id,
+        code: "EMAIL_DELIVERY_FAILED",
+        recoveryCommand: "npm run signup:resend-approval -- --email <applicant-email>",
+      }]);
+      assert.doesNotMatch(JSON.stringify(errors), /sensitive detail/);
+      assert.doesNotMatch(JSON.stringify(errors), /token=/);
+    });
+  } finally {
+    if (previousSignupMode === undefined) delete process.env.SIGNUP_MODE;
+    else process.env.SIGNUP_MODE = previousSignupMode;
+    if (previousApprovalToken === undefined) delete process.env.ACCESS_APPROVAL_TOKEN;
+    else process.env.ACCESS_APPROVAL_TOKEN = previousApprovalToken;
+    if (previousPublicBaseUrl === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
+  }
+});
+
+test("default admin notifier uses the injected mailer and password-email failure stays recoverable", async () => {
+  const previousSignupMode = process.env.SIGNUP_MODE;
+  const previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+  const previousApprovalEmail = process.env.SIGNUP_APPROVAL_EMAIL;
+  process.env.SIGNUP_MODE = "approval";
+  process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
+  process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
+  process.env.SIGNUP_APPROVAL_EMAIL = "owner@example.com";
+  const emails = [];
+  const errors = [];
+  const app = createApp({
+    authRequired: true,
+    signupRequestMailer: async (message) => {
+      emails.push(message);
+      if (/Set your .* password/.test(message.subject)) {
+        const error = new Error("private provider failure");
+        error.code = "EMAIL_DELIVERY_FAILED";
+        throw error;
+      }
+      return { sent: true, channel: "test" };
+    },
+    logger: { info() {}, error: (entry) => errors.push(entry) },
+  });
+
+  try {
+    await withServer(app, async (request) => {
+      const created = await request("/api/signup-requests", {
+        method: "POST",
+        body: JSON.stringify({ email: "recoverable@example.com", name: "Recoverable Rep" }),
+      });
+      const verifyUrl = new URL(emails[0].text.match(/https:\/\/\S+/)[0]);
+      const verifyResponse = await request(`${verifyUrl.pathname}${verifyUrl.search}`);
+      assert.equal(verifyResponse.response.status, 200);
+      assert.equal(emails[1].to, "owner@example.com");
+      assert.match(emails[1].text, /recoverable@example\.com/);
+
+      const approvalUrl = new URL(emails[1].text.match(/https:\/\/\S+/)[0]);
+      const confirmation = await request(`${approvalUrl.pathname}${approvalUrl.search}`);
+      assert.equal(confirmation.response.status, 200);
+      assert.equal(confirmation.response.headers.get("cache-control"), "no-store");
+      assert.equal(confirmation.response.headers.get("referrer-policy"), "no-referrer");
+      assert.equal((await loadSignupRequests())[0].status, "verified_pending_approval");
+
+      const approved = await request(approvalUrl.pathname, {
+        method: "POST",
+        body: JSON.stringify({ token: approvalUrl.searchParams.get("token") }),
+      });
+      assert.equal(approved.response.status, 503);
+      assert.equal((await loadSignupRequests())[0].status, "approved_pending_password");
+      assert.equal(errors[0].event, "signup_password_email_failed");
+      assert.equal(errors[0].requestId, created.body.id);
+      assert.doesNotMatch(JSON.stringify(errors), /private provider failure/);
+      assert.doesNotMatch(JSON.stringify(errors), /token=/);
+    });
+  } finally {
+    for (const [name, value] of [
+      ["SIGNUP_MODE", previousSignupMode],
+      ["ACCESS_APPROVAL_TOKEN", previousApprovalToken],
+      ["PUBLIC_BASE_URL", previousPublicBaseUrl],
+      ["SIGNUP_APPROVAL_EMAIL", previousApprovalEmail],
+    ]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("unexpected approval failures never log query-string tokens", async () => {
+  const previousSignupMode = process.env.SIGNUP_MODE;
+  const previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  const previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
+  process.env.SIGNUP_MODE = "approval";
+  process.env.ACCESS_APPROVAL_TOKEN = "approval-secret";
+  process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
+  const logs = [];
+  const brokenStore = path.join(tempDataDir, "signup-requests.json");
+  await fs.mkdir(brokenStore);
+  const app = createApp({
+    authRequired: true,
+    signupRequestMailer: async () => ({ sent: true, channel: "test" }),
+    verifiedSignupNotifier: async () => ({ sent: true, channel: "test" }),
+    logger: { info() {}, error: (entry) => logs.push(entry) },
+  });
+
+  try {
+    await withServer(app, async (request) => {
+      const response = await request(
+        "/api/signup-requests/request-id/approve?token=approval-token-must-not-log",
+      );
+      assert.equal(response.response.status, 500);
+      assert.equal(logs[0].route, "/api/signup-requests/request-id/approve");
+      assert.doesNotMatch(JSON.stringify(logs), /approval-token-must-not-log/);
+      assert.doesNotMatch(JSON.stringify(logs), /token=/);
+    });
+  } finally {
+    if (previousSignupMode === undefined) delete process.env.SIGNUP_MODE;
+    else process.env.SIGNUP_MODE = previousSignupMode;
+    if (previousApprovalToken === undefined) delete process.env.ACCESS_APPROVAL_TOKEN;
+    else process.env.ACCESS_APPROVAL_TOKEN = previousApprovalToken;
+    if (previousPublicBaseUrl === undefined) delete process.env.PUBLIC_BASE_URL;
+    else process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
   }
 });
 

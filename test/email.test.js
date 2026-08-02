@@ -11,6 +11,7 @@ let previousSmtpUser;
 let previousSmtpPass;
 let previousSmtpFrom;
 let previousSmtpFromName;
+let previousEmailDeliveryTimeoutMs;
 
 beforeEach(() => {
   previousBrevoApiKey = process.env.BREVO_API_KEY;
@@ -22,6 +23,7 @@ beforeEach(() => {
   previousSmtpPass = process.env.SMTP_PASS;
   previousSmtpFrom = process.env.SMTP_FROM;
   previousSmtpFromName = process.env.SMTP_FROM_NAME;
+  previousEmailDeliveryTimeoutMs = process.env.EMAIL_DELIVERY_TIMEOUT_MS;
   delete process.env.BREVO_API_KEY;
   delete process.env.RESEND_API_KEY;
   delete process.env.MAIL_FROM;
@@ -31,6 +33,7 @@ beforeEach(() => {
   delete process.env.SMTP_PASS;
   delete process.env.SMTP_FROM;
   delete process.env.SMTP_FROM_NAME;
+  delete process.env.EMAIL_DELIVERY_TIMEOUT_MS;
 });
 
 afterEach(() => {
@@ -44,6 +47,7 @@ afterEach(() => {
     ["SMTP_PASS", previousSmtpPass],
     ["SMTP_FROM", previousSmtpFrom],
     ["SMTP_FROM_NAME", previousSmtpFromName],
+    ["EMAIL_DELIVERY_TIMEOUT_MS", previousEmailDeliveryTimeoutMs],
   ]) {
     if (value === undefined) {
       delete process.env[name];
@@ -78,7 +82,12 @@ test("sendEmail posts to Brevo when configured", async () => {
     },
     {
       fetchImpl: async (url, options) => {
-        calls.push({ url, headers: options.headers, body: JSON.parse(options.body) });
+        calls.push({
+          url,
+          headers: options.headers,
+          body: JSON.parse(options.body),
+          signal: options.signal,
+        });
         return { ok: true, json: async () => ({ messageId: "brevo-message-id" }) };
       },
     },
@@ -87,6 +96,7 @@ test("sendEmail posts to Brevo when configured", async () => {
   assert.deepEqual(result, { sent: true, channel: "brevo", id: "brevo-message-id" });
   assert.equal(calls[0].url, "https://api.brevo.com/v3/smtp/email");
   assert.equal(calls[0].headers["api-key"], "brevo-secret");
+  assert.ok(calls[0].signal instanceof AbortSignal);
   assert.deepEqual(calls[0].body, {
     sender: { email: "trainer@example.com", name: "Tradesites AI Sales Trainer" },
     to: [{ email: "rep@example.com" }],

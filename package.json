@@ -17,6 +17,8 @@
     "data:backup": "node scripts/backup-data.js",
     "data:verify": "node scripts/verify-backup.js",
     "data:restore": "node scripts/restore-backup.js",
+    "signup:resend-approval": "node scripts/resend-signup-approval.js",
+    "signup:resend-password": "node scripts/resend-signup-password.js",
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "test": "node --test"
   },
