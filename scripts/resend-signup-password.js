@@ -23,8 +23,10 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   if (!email) throw new Error("Usage: npm run signup:resend-password -- --email applicant@example.com");
 
   const requests = await loadRequests();
-  const matches = requests.filter((item) => item.email === email);
-  if (matches.length !== 1 || matches[0].status !== STATUS.APPROVED) {
+  const matches = requests.filter(
+    (item) => item.email === email && item.status === STATUS.APPROVED,
+  );
+  if (matches.length !== 1) {
     throw new Error("Expected exactly one approved signup request awaiting password setup");
   }
   const [request] = matches;

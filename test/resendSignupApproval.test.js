@@ -37,6 +37,34 @@ test("password resend command rotates and sends without printing its secret", as
   assert.doesNotMatch(rendered, /token=/);
 });
 
+test("password resend ignores a retained used request when one approved request is active", async () => {
+  const output = [];
+  const historical = {
+    id: "request-used",
+    email: "rep@example.com",
+    status: "used",
+  };
+  const active = {
+    id: "request-approved",
+    email: "rep@example.com",
+    status: "approved_pending_password",
+  };
+  let rotatedId;
+
+  await resendPasswordSetup(["--email", active.email], {
+    loadSignupRequests: async () => [historical, active],
+    rotateSignupPasswordSetupToken: async (id) => {
+      rotatedId = id;
+      return { request: active, passwordSetupToken: "replacement-password-token" };
+    },
+    mailer: async () => ({ sent: true, channel: "smtp" }),
+    stdout: { write: (value) => output.push(value) },
+  });
+
+  assert.equal(rotatedId, active.id);
+  assert.match(output.join(""), /"requestId":"request-approved"/);
+});
+
 test("resend approval command rotates and sends without printing the approval secret", async () => {
   const output = [];
   const request = {
@@ -78,6 +106,33 @@ test("resend approval command fails closed for duplicate applicant records", asy
     env: { SIGNUP_APPROVAL_EMAIL: "owner@example.com" },
     loadSignupRequests: async () => [duplicate, { ...duplicate, id: "another-request" }],
   }), /exactly one verified signup request/);
+});
+
+test("approval resend ignores a retained used request when one verified request is active", async () => {
+  const historical = {
+    id: "request-used",
+    email: "rep@example.com",
+    status: "used",
+  };
+  const active = {
+    id: "request-verified",
+    email: "rep@example.com",
+    status: "verified_pending_approval",
+  };
+  let rotatedId;
+
+  await main(["--email", active.email], {
+    env: { SIGNUP_APPROVAL_EMAIL: "owner@example.com" },
+    loadSignupRequests: async () => [historical, active],
+    rotateSignupApprovalToken: async (id) => {
+      rotatedId = id;
+      return { ...active, adminApprovalToken: "replacement-approval-token" };
+    },
+    notifyVerifiedSignupRequest: async () => ({ sent: true, channel: "email" }),
+    stdout: { write: () => {} },
+  });
+
+  assert.equal(rotatedId, active.id);
 });
 
 test("resend approval command supports a Telegram-only notification configuration", async () => {

@@ -28,8 +28,10 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   }
 
   const requests = await loadRequests();
-  const matches = requests.filter((item) => item.email === email);
-  if (matches.length !== 1 || matches[0].status !== STATUS.VERIFIED) {
+  const matches = requests.filter(
+    (item) => item.email === email && item.status === STATUS.VERIFIED,
+  );
+  if (matches.length !== 1) {
     throw new Error("Expected exactly one verified signup request awaiting approval");
   }
   const [request] = matches;
