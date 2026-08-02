@@ -7,15 +7,28 @@ const { createApp } = require("../src/server");
 const { createFixedWindowRateLimiter } = require("../src/rateLimit");
 const { loadSkillMemory, saveSkillMemory } = require("../src/skillMemory");
 const { profilePath } = require("../src/profileStore");
-const { loadSignupRequests } = require("../src/signupRequests");
+const {
+  approveSignupRequest,
+  consumeSignupRequest,
+  createSignupRequest,
+  loadSignupRequests,
+  validatePasswordSetupToken,
+  verifySignupEmail,
+} = require("../src/signupRequests");
 
 let previousDataDir;
+let previousApprovalToken;
+let previousPublicBaseUrl;
 let tempDataDir;
 
 beforeEach(async () => {
   previousDataDir = process.env.DATA_DIR;
+  previousApprovalToken = process.env.ACCESS_APPROVAL_TOKEN;
+  previousPublicBaseUrl = process.env.PUBLIC_BASE_URL;
   tempDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "tradesites-auth-test-"));
   process.env.DATA_DIR = tempDataDir;
+  process.env.ACCESS_APPROVAL_TOKEN = "auth-routes-test-approval-secret";
+  process.env.PUBLIC_BASE_URL = "https://trainer.example.test";
 });
 
 afterEach(async () => {
@@ -23,6 +36,16 @@ afterEach(async () => {
     delete process.env.DATA_DIR;
   } else {
     process.env.DATA_DIR = previousDataDir;
+  }
+  if (previousApprovalToken === undefined) {
+    delete process.env.ACCESS_APPROVAL_TOKEN;
+  } else {
+    process.env.ACCESS_APPROVAL_TOKEN = previousApprovalToken;
+  }
+  if (previousPublicBaseUrl === undefined) {
+    delete process.env.PUBLIC_BASE_URL;
+  } else {
+    process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
   }
   await fs.rm(tempDataDir, { recursive: true, force: true });
 });
@@ -57,6 +80,17 @@ const usersByToken = {
 
 function authHeader(token) {
   return { Authorization: `Bearer ${token}` };
+}
+
+async function createApprovedPasswordSetup(email = "approved-existing@example.com") {
+  const created = await createSignupRequest({ email, name: "Approved Existing Rep" });
+  const verified = await verifySignupEmail(created.request.id, created.emailVerificationToken);
+  const approved = await approveSignupRequest(created.request.id, verified.adminApprovalToken);
+  return {
+    id: approved.request.id,
+    token: approved.passwordSetupToken,
+    request: approved.request,
+  };
 }
 
 test("auth endpoints use injected PocketBase client and return normalized auth shape", async () => {
@@ -274,17 +308,17 @@ test("approval-mode signup verifies email before admin approval and password set
     },
     authClient: {
       login: async ({ email }) => ({
-        token: `token-${email}`,
-        user: { id: `user-${email}`, email, name: email, source: "pocketbase" },
+        token: "token-approved",
+        user: { id: "approved-user", email, name: email, source: "pocketbase" },
       }),
       signup: async ({ email, password }) => {
+        throw new Error(`ordinary signup must not be used for ${email}:${password.length}`);
+      },
+      provisionApprovedUser: async ({ email, password }) => {
         assert.equal(email, "approved@example.com");
         assert.equal(password, "secret123");
         createdUsers.push(email);
-        return {
-          token: "token-approved",
-          user: { id: "approved-user", email, name: email, source: "pocketbase" },
-        };
+        return { created: true, user: { id: "approved-user", email } };
       },
     },
   });
@@ -377,6 +411,308 @@ test("approval-mode signup verifies email before admin approval and password set
       process.env.PUBLIC_BASE_URL = previousPublicBaseUrl;
     }
   }
+});
+
+test("approved password setup uses explicit approved-user provisioning and needs no bearer token", async () => {
+  const setup = await createApprovedPasswordSetup();
+  let provisionCalls = 0;
+  let signupCalls = 0;
+  let verifierCalls = 0;
+  let loginCalls = 0;
+  const expectedAuth = {
+    token: "existing-user-token",
+    user: {
+      id: "existing-user-id",
+      email: setup.request.email,
+      name: setup.request.name,
+      source: "pocketbase",
+    },
+  };
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authVerifier: async () => {
+      verifierCalls += 1;
+      throw new Error("set-password must not require bearer authentication");
+    },
+    authClient: {
+      login: async (input) => {
+        loginCalls += 1;
+        assert.deepEqual(input, { email: setup.request.email, password: "new-secret-123" });
+        return expectedAuth;
+      },
+      signup: async () => {
+        signupCalls += 1;
+        const error = new Error("PocketBase duplicate user");
+        error.status = 400;
+        throw error;
+      },
+      provisionApprovedUser: async (input) => {
+        provisionCalls += 1;
+        assert.deepEqual(input, {
+          email: setup.request.email,
+          password: "new-secret-123",
+          name: setup.request.name,
+        });
+        return { created: false, user: { id: "existing-user-id" } };
+      },
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const result = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "new-secret-123" }),
+    });
+
+    assert.equal(result.response.status, 201);
+    assert.deepEqual(result.body, expectedAuth);
+    assert.equal(provisionCalls, 1);
+    assert.equal(loginCalls, 1);
+    assert.equal(signupCalls, 0, "approved setup must not use public signup/create");
+    assert.equal(verifierCalls, 0, "the approved one-time token is the authorization");
+  });
+});
+
+test("invalid and stale password setup tokens never call approved-user provisioning", async () => {
+  const invalidSetup = await createApprovedPasswordSetup("invalid-token@example.com");
+  const staleSetup = await createApprovedPasswordSetup("stale-token@example.com");
+  await consumeSignupRequest(staleSetup.id);
+  let provisionCalls = 0;
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authClient: {
+      login: async () => { throw new Error("login must not run"); },
+      signup: async () => {
+        throw new Error("ordinary signup must not be called");
+      },
+      provisionApprovedUser: async () => {
+        provisionCalls += 1;
+        throw new Error("provisioning must not run for rejected tokens");
+      },
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const invalid = await request(`/api/signup-requests/${invalidSetup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: "wrong-token", password: "new-secret-123" }),
+    });
+    const stale = await request(`/api/signup-requests/${staleSetup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: staleSetup.token, password: "new-secret-123" }),
+    });
+
+    assert.equal(invalid.response.status, 403);
+    assert.equal(invalid.body.code, "signup_password_token_invalid");
+    assert.equal(stale.response.status, 403);
+    assert.equal(stale.body.code, "signup_request_not_approved");
+    assert.equal(provisionCalls, 0);
+  });
+});
+
+test("password setup rejects oversized passwords before provisioning", async () => {
+  const setup = await createApprovedPasswordSetup("oversized-password@example.com");
+  let provisionCalls = 0;
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authClient: {
+      login: async () => { throw new Error("login must not run"); },
+      signup: async () => { throw new Error("ordinary signup must not be called"); },
+      provisionApprovedUser: async () => { provisionCalls += 1; },
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const result = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "x".repeat(257) }),
+    });
+    assert.equal(result.response.status, 400);
+    assert.equal(result.body.code, "password_too_long");
+    assert.equal(provisionCalls, 0);
+  });
+});
+
+test("rate limiting leaves the approved password setup token usable", async () => {
+  const setup = await createApprovedPasswordSetup("rate-limited-setup@example.com");
+  let provisionCalls = 0;
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authRateLimiter: {
+      consume: () => ({ limited: true, retryAfterSeconds: 60 }),
+      reset: () => {},
+    },
+    authClient: {
+      login: async () => { throw new Error("login must not run"); },
+      signup: async () => { throw new Error("ordinary signup must not run"); },
+      provisionApprovedUser: async () => { provisionCalls += 1; },
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const result = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "new-secret-123" }),
+    });
+    assert.equal(result.response.status, 429);
+    assert.equal(result.body.code, "auth_rate_limited");
+    assert.equal(result.response.headers.get("retry-after"), "60");
+    assert.equal(provisionCalls, 0);
+    await assert.doesNotReject(() => validatePasswordSetupToken(setup.id, setup.token));
+  });
+});
+
+test("ambiguous provisioning failure is safe and makes the one-time token non-replayable", async () => {
+  const setup = await createApprovedPasswordSetup("provision-retry@example.com");
+  let sideEffects = 0;
+  const provisionApprovedUser = async () => {
+    sideEffects += 1;
+    const error = new Error("secret PocketBase infrastructure detail after commit");
+    error.status = 503;
+    throw error;
+  };
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authClient: {
+      login: async () => { throw new Error("login must not run"); },
+      signup: async () => { throw new Error("ordinary signup must not run"); },
+      provisionApprovedUser,
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const failed = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "new-secret-123" }),
+    });
+    assert.equal(failed.response.status, 503);
+    assert.equal(failed.body.code, "approved_user_provisioning_unavailable");
+    assert.equal(failed.body.error, "Approved account setup is temporarily unavailable.");
+    assert.doesNotMatch(JSON.stringify(failed.body), /Authentication required|secret PocketBase/i);
+    await assert.rejects(
+      () => validatePasswordSetupToken(setup.id, setup.token),
+      { code: "SIGNUP_PASSWORD_SETUP_IN_PROGRESS" },
+    );
+    const replay = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "new-secret-123" }),
+    });
+    assert.equal(replay.response.status, 409);
+    assert.equal(replay.body.code, "signup_password_setup_in_progress");
+    assert.equal(sideEffects, 1);
+  });
+});
+
+test("login failure after provisioning consumes the setup token and cannot reprovision", async () => {
+  const setup = await createApprovedPasswordSetup("post-provision-login-failure@example.com");
+  let provisionCalls = 0;
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authClient: {
+      signup: async () => { throw new Error("ordinary signup must not run"); },
+      provisionApprovedUser: async () => {
+        provisionCalls += 1;
+        return { created: false, user: { id: "existing-id" } };
+      },
+      login: async () => {
+        const error = new Error("login response lost");
+        error.status = 503;
+        throw error;
+      },
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const first = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "new-secret-123" }),
+    });
+    assert.equal(first.response.status, 503);
+    assert.equal(first.body.code, "approved_user_login_unavailable");
+    assert.match(first.body.error, /password was set/i);
+
+    const replay = await request(`/api/signup-requests/${setup.id}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "different-secret-456" }),
+    });
+    assert.equal(replay.response.status, 403);
+    assert.equal(replay.body.code, "signup_request_not_approved");
+    assert.equal(provisionCalls, 1);
+  });
+});
+
+test("concurrent password setup token use provisions at most once", async () => {
+  const setup = await createApprovedPasswordSetup("concurrent-setup@example.com");
+  let provisionCalls = 0;
+  let signalEntered;
+  let releaseProvision;
+  const entered = new Promise((resolve) => { signalEntered = resolve; });
+  const release = new Promise((resolve) => { releaseProvision = resolve; });
+  const provisionApprovedUser = async () => {
+    provisionCalls += 1;
+    signalEntered();
+    await release;
+    return {
+      token: "concurrent-token",
+      user: { id: "concurrent-id", email: setup.request.email, name: setup.request.name, source: "pocketbase" },
+    };
+  };
+  const app = createApp({
+    authRequired: true,
+    signupMode: "approval",
+    signupRequestMailer: async () => ({ sent: true }),
+    verifiedSignupNotifier: async () => ({ sent: true }),
+    authClient: {
+      login: async () => ({
+        token: "concurrent-token",
+        user: { id: "concurrent-id", email: setup.request.email, name: setup.request.name, source: "pocketbase" },
+      }),
+      signup: provisionApprovedUser,
+      provisionApprovedUser,
+    },
+  });
+
+  await withServer(app, async (request) => {
+    const route = `/api/signup-requests/${setup.id}/set-password`;
+    const options = {
+      method: "POST",
+      body: JSON.stringify({ token: setup.token, password: "new-secret-123" }),
+    };
+    const first = request(route, options);
+    await entered;
+    const second = request(route, options);
+
+    let results;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(provisionCalls, 1, "the token must reserve one provisioning attempt");
+    } finally {
+      releaseProvision();
+      results = await Promise.all([first, second]);
+    }
+
+    assert.equal(provisionCalls, 1);
+    assert.deepEqual(results.map((result) => result.response.status).sort(), [201, 409]);
+    assert.equal(results.find((result) => result.response.status === 409).body.code, "signup_password_setup_in_progress");
+  });
 });
 
 test("verified signup stays verified and emits a safe recovery signal when admin notification fails", async () => {

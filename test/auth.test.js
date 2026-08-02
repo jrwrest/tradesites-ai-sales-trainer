@@ -3,10 +3,20 @@ const { test } = require("node:test");
 const {
   getBearerToken,
   LOCAL_USER,
+  checkPocketBaseProvisioner,
   normalizePocketBaseAuth,
+  provisionApprovedUserWithPocketBase,
   resolveRequestUser,
   validatePocketBaseUrl,
 } = require("../src/auth");
+
+function jsonResponse(status, payload) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => payload,
+  };
+}
 
 test("getBearerToken accepts bearer authorization headers only", () => {
   assert.equal(getBearerToken({ headers: { authorization: "Bearer abc123" } }), "abc123");
@@ -126,5 +136,84 @@ test("validatePocketBaseUrl allows loopback http and rejects unsafe remote http 
     } else {
       process.env.ALLOW_REMOTE_POCKETBASE_UNSAFE = previousUnsafe;
     }
+  }
+});
+
+test("approved-user provisioning calls only the scoped hook", async () => {
+  const previousSecret = process.env.POCKETBASE_PROVISIONING_SECRET;
+  const previousUrl = process.env.POCKETBASE_URL;
+  process.env.POCKETBASE_PROVISIONING_SECRET = "s".repeat(48);
+  process.env.POCKETBASE_URL = "http://127.0.0.1:8090";
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return jsonResponse(200, { created: false, user: { id: "existing-id" } });
+  };
+  try {
+    const result = await provisionApprovedUserWithPocketBase({
+      email: "rep@example.com",
+      password: "new-secret-123",
+      name: "Replacement Name",
+    }, { fetchImpl });
+
+    assert.equal(result.user.id, "existing-id");
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /\/api\/trainer\/provision-approved-user$/);
+    assert.equal(calls[0].options.headers["X-Trainer-Provisioning-Key"], "s".repeat(48));
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      email: "rep@example.com",
+      password: "new-secret-123",
+      name: "Replacement Name",
+    });
+  } finally {
+    if (previousSecret === undefined) delete process.env.POCKETBASE_PROVISIONING_SECRET;
+    else process.env.POCKETBASE_PROVISIONING_SECRET = previousSecret;
+    if (previousUrl === undefined) delete process.env.POCKETBASE_URL;
+    else process.env.POCKETBASE_URL = previousUrl;
+  }
+});
+
+test("approved-user provisioning fails closed with a safe retryable error", async () => {
+  const previousSecret = process.env.POCKETBASE_PROVISIONING_SECRET;
+  process.env.POCKETBASE_PROVISIONING_SECRET = "s".repeat(48);
+  try {
+    await assert.rejects(
+      () => provisionApprovedUserWithPocketBase(
+        { email: "rep@example.com", password: "new-secret-123" },
+        { fetchImpl: async () => jsonResponse(403, { secret: "provider detail" }) },
+      ),
+      (error) => error.code === "POCKETBASE_PROVISIONING_UNAVAILABLE"
+        && error.status === 503
+        && !/provider detail|secret/i.test(error.message),
+    );
+  } finally {
+    if (previousSecret === undefined) delete process.env.POCKETBASE_PROVISIONING_SECRET;
+    else process.env.POCKETBASE_PROVISIONING_SECRET = previousSecret;
+  }
+});
+
+test("provisioning config and health check fail closed", async () => {
+  const previousSecret = process.env.POCKETBASE_PROVISIONING_SECRET;
+  try {
+    delete process.env.POCKETBASE_PROVISIONING_SECRET;
+    await assert.rejects(
+      () => provisionApprovedUserWithPocketBase({ email: "rep@example.com", password: "new-secret-123" }),
+      { code: "POCKETBASE_PROVISIONING_CONFIG_INVALID" },
+    );
+    assert.equal(await checkPocketBaseProvisioner(), false);
+
+    process.env.POCKETBASE_PROVISIONING_SECRET = "h".repeat(40);
+    let request;
+    assert.equal(await checkPocketBaseProvisioner({
+      fetchImpl: async (url, options) => {
+        request = { url, options };
+        return jsonResponse(200, { ok: true });
+      },
+    }), true);
+    assert.match(request.url, /\/api\/trainer\/provisioning-health$/);
+    assert.equal(request.options.headers["X-Trainer-Provisioning-Key"], "h".repeat(40));
+  } finally {
+    if (previousSecret === undefined) delete process.env.POCKETBASE_PROVISIONING_SECRET;
+    else process.env.POCKETBASE_PROVISIONING_SECRET = previousSecret;
   }
 });

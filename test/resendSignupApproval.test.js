@@ -4,6 +4,10 @@ const { main, requestedEmail } = require("../scripts/resend-signup-approval");
 const {
   main: resendPasswordSetup,
 } = require("../scripts/resend-signup-password");
+const {
+  main: reconcilePasswordSetup,
+  parseArguments: parseReconciliationArguments,
+} = require("../scripts/reconcile-signup-password");
 
 test("resend approval command accepts an explicit email flag", () => {
   assert.equal(requestedEmail(["--email", " Rep@Example.com "]), "rep@example.com");
@@ -63,6 +67,55 @@ test("password resend ignores a retained used request when one approved request 
 
   assert.equal(rotatedId, active.id);
   assert.match(output.join(""), /"requestId":"request-approved"/);
+});
+
+test("password reconciliation requires request id and an explicit outcome", () => {
+  assert.deepEqual(
+    parseReconciliationArguments(["--request-id", "request-3", "--outcome", "committed"]),
+    { requestId: "request-3", outcome: "committed" },
+  );
+  assert.throws(() => parseReconciliationArguments(["--outcome", "not-committed"]), /Usage:/);
+});
+
+test("confirmed non-commit reconciliation emails a replacement without printing its token", async () => {
+  const output = [];
+  const request = { id: "request-3", email: "rep@example.com", status: "approved_pending_password" };
+  await reconcilePasswordSetup(
+    ["--request-id", request.id, "--outcome", "not-committed"],
+    {
+      reconcilePasswordSetup: async (id, outcome) => {
+        assert.equal(id, request.id);
+        assert.equal(outcome, "not-committed");
+        return { request, passwordSetupToken: "replacement-secret-token" };
+      },
+      mailer: async (message) => {
+        assert.equal(message.to, request.email);
+        assert.match(message.text, /replacement-secret-token/);
+      },
+      stdout: { write: (value) => output.push(value) },
+    },
+  );
+  assert.match(output.join(""), /"outcome":"not-committed"/);
+  assert.doesNotMatch(output.join(""), /replacement-secret-token|token=/);
+});
+
+test("confirmed commit reconciliation sends no email and exposes no token", async () => {
+  const output = [];
+  let mailCalls = 0;
+  await reconcilePasswordSetup(
+    ["--request-id", "request-4", "--outcome", "committed"],
+    {
+      reconcilePasswordSetup: async () => ({
+        request: { id: "request-4", email: "rep@example.com", status: "used" },
+        passwordSetupToken: null,
+      }),
+      mailer: async () => { mailCalls += 1; },
+      stdout: { write: (value) => output.push(value) },
+    },
+  );
+  assert.equal(mailCalls, 0);
+  assert.match(output.join(""), /"outcome":"committed"/);
+  assert.doesNotMatch(output.join(""), /token=/);
 });
 
 test("resend approval command rotates and sends without printing the approval secret", async () => {

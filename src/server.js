@@ -25,7 +25,7 @@ const {
   approveSignupRequest,
   buildPasswordSetupUrl,
   buildVerificationUrl,
-  consumeSignupRequest,
+  completePasswordSetup,
   createSignupRequest,
   notifyVerifiedSignupRequest,
   validatePasswordSetupToken,
@@ -35,7 +35,9 @@ const {
 const {
   LOCAL_USER,
   checkPocketBaseHealth,
+  checkPocketBaseProvisioner,
   loginWithPocketBase,
+  provisionApprovedUserWithPocketBase,
   resolveRequestUser,
   signupWithPocketBase,
   verifyPocketBaseToken,
@@ -153,6 +155,11 @@ function validateProductionConfig({ env = process.env } = {}) {
   if ((env.SIGNUP_MODE || "disabled") === "open" && env.ALLOW_PUBLIC_SIGNUP !== "1") {
     errors.push("open signup requires ALLOW_PUBLIC_SIGNUP=1");
   }
+  if ((env.SIGNUP_MODE || "disabled") === "approval") {
+    if (String(env.POCKETBASE_PROVISIONING_SECRET || "").length < 32) {
+      errors.push("POCKETBASE_PROVISIONING_SECRET must be at least 32 characters");
+    }
+  }
   if (env.OPENCLAW_GATEWAY_URL) {
     if (!env.OPENCLAW_GATEWAY_TOKEN) errors.push("OPENCLAW_GATEWAY_TOKEN is required");
     if (env.OPENCLAW_AGENT_ID !== "sales-trainer-customer") {
@@ -243,6 +250,9 @@ function defaultReadinessChecks({ authRequired }) {
     ...(authRequired
       ? [{ name: "auth", required: true, check: checkPocketBaseHealth }]
       : []),
+    ...(process.env.SIGNUP_MODE === "approval"
+      ? [{ name: "approved_user_provisioning", required: true, check: checkPocketBaseProvisioner }]
+      : []),
     ...(process.env.OPENCLAW_GATEWAY_URL
       ? [{ name: "openclaw", required: true, check: checkOpenClawGateway }]
       : []),
@@ -277,6 +287,7 @@ function createApp(options = {}) {
   const authClient = options.authClient || {
     login: loginWithPocketBase,
     signup: signupWithPocketBase,
+    provisionApprovedUser: provisionApprovedUserWithPocketBase,
   };
   validateApprovalModeConfig({
     signupMode,
@@ -694,14 +705,34 @@ function createApp(options = {}) {
         sendApiError(req, res, 400, "password_too_short", "Password must be at least 8 characters");
         return;
       }
-      const request = await validatePasswordSetupToken(req.params.id, token);
-      if (enforceAuthRateLimit(req, res, request.email)) {
+      if (password.length > 256) {
+        sendApiError(req, res, 400, "password_too_long", "Password must be no more than 256 characters");
+        return;
+      }
+      const preflightRequest = await validatePasswordSetupToken(req.params.id, token);
+      if (enforceAuthRateLimit(req, res, preflightRequest.email)) {
         sendApiError(req, res, 429, "auth_rate_limited", "Too many signup attempts");
         return;
       }
-      const auth = await authClient.signup({ email: request.email, password, name: request.name });
-      authRateLimiter.reset(authRateLimitKey(req, request.email));
-      await consumeSignupRequest(request.id);
+      const completed = await completePasswordSetup(
+        req.params.id,
+        token,
+        async (request) => authClient.provisionApprovedUser({
+            email: request.email,
+            password,
+            name: request.name,
+          }),
+      );
+      authRateLimiter.reset(authRateLimitKey(req, completed.request.email));
+      let auth;
+      try {
+        auth = await authClient.login({ email: completed.request.email, password });
+      } catch {
+        const error = new Error("Approved account login unavailable after password setup");
+        error.code = "APPROVED_USER_LOGIN_UNAVAILABLE";
+        error.status = 503;
+        throw error;
+      }
       res.status(201).json(auth);
     } catch (error) {
       if (error.code === "SIGNUP_REQUEST_NOT_APPROVED") {
@@ -716,7 +747,40 @@ function createApp(options = {}) {
         sendApiError(req, res, 403, "signup_password_token_expired", "Password setup token expired");
         return;
       }
-      error.code = error.status && error.status < 500 ? "AUTH_INVALID" : error.code;
+      if (error.code === "SIGNUP_PASSWORD_SETUP_IN_PROGRESS") {
+        sendApiError(
+          req,
+          res,
+          409,
+          "signup_password_setup_in_progress",
+          "This password setup link has already been submitted. Try logging in with the password you chose.",
+        );
+        return;
+      }
+      if (error.code === "SIGNUP_REQUESTS_LOCK_TIMEOUT") {
+        sendApiError(req, res, 503, "signup_setup_busy", "Account setup is busy. Please try again.");
+        return;
+      }
+      if (error.code === "APPROVED_USER_LOGIN_UNAVAILABLE") {
+        sendApiError(
+          req,
+          res,
+          503,
+          "approved_user_login_unavailable",
+          "Your password was set, but automatic login failed. Return to login and use the password you chose.",
+        );
+        return;
+      }
+      if (error.status === 503 || error.code === "POCKETBASE_PROVISIONING_CONFIG_INVALID") {
+        sendApiError(
+          req,
+          res,
+          503,
+          "approved_user_provisioning_unavailable",
+          "Approved account setup is temporarily unavailable.",
+        );
+        return;
+      }
       next(error);
     }
   });

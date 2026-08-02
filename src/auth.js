@@ -64,7 +64,9 @@ function normalizePocketBaseAuth(payload = {}) {
   };
 }
 
-async function pocketBaseRequest(path, { method = "GET", token, body, fetchImpl = fetch } = {}) {
+async function pocketBaseRequest(path, {
+  method = "GET", token, body, headers = {}, fetchImpl = fetch,
+} = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), pocketBaseTimeoutMs());
   try {
@@ -74,6 +76,7 @@ async function pocketBaseRequest(path, { method = "GET", token, body, fetchImpl 
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -134,6 +137,43 @@ async function signupWithPocketBase({ email, password, name }, options = {}) {
   return loginWithPocketBase({ email, password }, options);
 }
 
+function provisioningSecret() {
+  return String(process.env.POCKETBASE_PROVISIONING_SECRET || "");
+}
+
+async function provisionApprovedUserWithPocketBase({ email, password, name }, options = {}) {
+  const secret = provisioningSecret();
+  if (secret.length < 32) {
+    const error = new Error("Approved-user provisioning is not configured");
+    error.code = "POCKETBASE_PROVISIONING_CONFIG_INVALID";
+    error.status = 503;
+    throw error;
+  }
+  try {
+    return await pocketBaseRequest("/api/trainer/provision-approved-user", {
+      method: "POST",
+      body: { email, password, name },
+      headers: { "X-Trainer-Provisioning-Key": secret },
+      fetchImpl: options.fetchImpl,
+    });
+  } catch {
+    const error = new Error("Approved-user provisioning unavailable");
+    error.code = "POCKETBASE_PROVISIONING_UNAVAILABLE";
+    error.status = 503;
+    throw error;
+  }
+}
+
+async function checkPocketBaseProvisioner(options = {}) {
+  const secret = provisioningSecret();
+  if (secret.length < 32) return false;
+  await pocketBaseRequest("/api/trainer/provisioning-health", {
+    headers: { "X-Trainer-Provisioning-Key": secret },
+    fetchImpl: options.fetchImpl,
+  });
+  return true;
+}
+
 async function resolveRequestUser(req, { authRequired = false, verifyToken = verifyPocketBaseToken } = {}) {
   const token = getBearerToken(req);
   if (!token) {
@@ -160,12 +200,14 @@ async function resolveRequestUser(req, { authRequired = false, verifyToken = ver
 
 module.exports = {
   LOCAL_USER,
+  checkPocketBaseProvisioner,
   checkPocketBaseHealth,
   getBearerToken,
   loginWithPocketBase,
   normalizePocketBaseAuth,
   normalizePocketBaseUser,
   pocketBaseUrl,
+  provisionApprovedUserWithPocketBase,
   resolveRequestUser,
   signupWithPocketBase,
   validatePocketBaseUrl,

@@ -373,8 +373,13 @@ test("production config requires auth, retention, explicit single-instance stora
     BACKUP_ROOT: "/var/backups/trainer",
     PUBLIC_BASE_URL: "https://trainer.example.test",
     SIGNUP_MODE: "approval",
+    POCKETBASE_PROVISIONING_SECRET: "s".repeat(40),
   };
   assert.doesNotThrow(() => validateProductionConfig({ env: base }));
+  assert.throws(
+    () => validateProductionConfig({ env: { ...base, POCKETBASE_PROVISIONING_SECRET: "short" } }),
+    /POCKETBASE_PROVISIONING_SECRET must be at least 32 characters/,
+  );
   for (const [name, value] of [
     ["AUTH_REQUIRED", "0"],
     ["DATA_RETENTION_ENABLED", "0"],

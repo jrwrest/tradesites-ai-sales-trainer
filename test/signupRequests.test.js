@@ -10,9 +10,11 @@ const {
   buildApprovalUrl,
   buildPasswordSetupUrl,
   buildVerificationUrl,
+  completePasswordSetup,
   createSignupRequest,
   loadSignupRequests,
   notifyVerifiedSignupRequest,
+  reconcilePasswordSetup,
   rotateSignupApprovalToken,
   rotateSignupPasswordSetupToken,
   validatePasswordSetupToken,
@@ -452,5 +454,54 @@ test("approval tokens expire and are per-request instead of the global secret", 
   await assert.rejects(
     () => approveSignupRequest(request.id, verified.adminApprovalToken, new Date("2026-05-21T11:10:01.000Z")),
     (error) => error.code === "SIGNUP_APPROVAL_TOKEN_EXPIRED",
+  );
+});
+
+test("operator reconciliation rotates a new token only after a confirmed non-commit", async () => {
+  const created = await createSignupRequest({ email: "reconcile-noncommit@example.com" });
+  const verified = await verifySignupEmail(created.request.id, created.emailVerificationToken);
+  const approved = await approveSignupRequest(created.request.id, verified.adminApprovalToken);
+  await assert.rejects(
+    () => completePasswordSetup(approved.request.id, approved.passwordSetupToken, async () => {
+      const error = new Error("confirmed no commit");
+      error.status = 503;
+      throw error;
+    }),
+    /confirmed no commit/,
+  );
+
+  const reconciled = await reconcilePasswordSetup(
+    approved.request.id,
+    "not-committed",
+    new Date("2026-08-02T12:00:00.000Z"),
+  );
+  assert.equal(reconciled.request.status, "approved_pending_password");
+  assert.ok(reconciled.passwordSetupToken);
+  await assert.rejects(
+    () => validatePasswordSetupToken(approved.request.id, approved.passwordSetupToken),
+    (error) => error.code === "SIGNUP_PASSWORD_TOKEN_INVALID",
+  );
+  await assert.doesNotReject(
+    () => validatePasswordSetupToken(approved.request.id, reconciled.passwordSetupToken),
+  );
+});
+
+test("operator reconciliation finalizes a confirmed commit without issuing a token", async () => {
+  const created = await createSignupRequest({ email: "reconcile-commit@example.com" });
+  const verified = await verifySignupEmail(created.request.id, created.emailVerificationToken);
+  const approved = await approveSignupRequest(created.request.id, verified.adminApprovalToken);
+  await assert.rejects(
+    () => completePasswordSetup(approved.request.id, approved.passwordSetupToken, async () => {
+      throw new Error("response lost after commit");
+    }),
+    /response lost after commit/,
+  );
+
+  const reconciled = await reconcilePasswordSetup(approved.request.id, "committed");
+  assert.equal(reconciled.request.status, "used");
+  assert.equal(reconciled.passwordSetupToken, null);
+  await assert.rejects(
+    () => reconcilePasswordSetup(approved.request.id, "not-committed"),
+    (error) => error.code === "SIGNUP_PASSWORD_RECONCILIATION_NOT_REQUIRED",
   );
 });

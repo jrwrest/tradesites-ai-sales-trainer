@@ -8,6 +8,7 @@ const STATUS = {
   PENDING_EMAIL: "pending_email_verification",
   VERIFIED: "verified_pending_approval",
   APPROVED: "approved_pending_password",
+  PROVISIONING: "password_setup_in_progress",
   USED: "used",
 };
 
@@ -220,6 +221,7 @@ async function createSignupRequestUnlocked(input = {}, now = new Date()) {
     adminApprovalExpiresAt: null,
     passwordSetupEmailSentAt: null,
     passwordSetupExpiresAt: null,
+    passwordSetupStartedAt: null,
     usedAt: null,
     emailVerificationTokenHash: hashToken(emailVerificationToken),
     adminApprovalTokenHash: null,
@@ -368,6 +370,16 @@ async function rotateSignupPasswordSetupToken(id, now = new Date()) {
 async function validatePasswordSetupToken(id, token, now = new Date()) {
   const requests = await loadSignupRequests();
   const request = requests.find((item) => item.id === id);
+  assertPasswordSetupToken(request, token, now);
+  return request;
+}
+
+function assertPasswordSetupToken(request, token, now = new Date()) {
+  if (request?.status === STATUS.PROVISIONING) {
+    const error = new Error("Password setup is already in progress");
+    error.code = "SIGNUP_PASSWORD_SETUP_IN_PROGRESS";
+    throw error;
+  }
   if (!request || request.status !== STATUS.APPROVED) {
     const error = new Error("Signup request is not approved for password setup");
     error.code = "SIGNUP_REQUEST_NOT_APPROVED";
@@ -383,7 +395,74 @@ async function validatePasswordSetupToken(id, token, now = new Date()) {
     error.code = "SIGNUP_PASSWORD_TOKEN_INVALID";
     throw error;
   }
-  return request;
+}
+
+async function completePasswordSetup(id, token, provision, now = new Date()) {
+  if (typeof provision !== "function") throw new TypeError("provision must be a function");
+  const request = await withSignupRequestsLock(async () => {
+    const requests = await loadSignupRequests();
+    const request = requests.find((item) => item.id === id);
+    assertPasswordSetupToken(request, token, now);
+
+    // Persist a non-replayable reservation before any external mutation. If the
+    // provider commits and its response is lost, this token still cannot run twice.
+    request.status = STATUS.PROVISIONING;
+    request.passwordSetupStartedAt = now.toISOString();
+    request.passwordSetupTokenHash = null;
+    await saveSignupRequests(requests);
+    return { ...request };
+  });
+
+  // Do not hold the global signup-store lock across a network request.
+  const result = await provision(request);
+
+  const finalized = await withSignupRequestsLock(async () => {
+    const requests = await loadSignupRequests();
+    const reserved = requests.find((item) => item.id === id);
+    if (!reserved || reserved.status !== STATUS.PROVISIONING) {
+      const error = new Error("Password setup reservation was lost");
+      error.code = "SIGNUP_PASSWORD_SETUP_RESERVATION_LOST";
+      throw error;
+    }
+    reserved.status = STATUS.USED;
+    reserved.usedAt = now.toISOString();
+    await saveSignupRequests(requests);
+    return reserved;
+  });
+  return { request: finalized, result };
+}
+
+async function reconcilePasswordSetup(id, outcome, now = new Date()) {
+  if (!["committed", "not-committed"].includes(outcome)) {
+    const error = new Error("Reconciliation outcome must be committed or not-committed");
+    error.code = "SIGNUP_PASSWORD_RECONCILIATION_OUTCOME_INVALID";
+    throw error;
+  }
+  return withSignupRequestsLock(async () => {
+    const requests = await loadSignupRequests();
+    const request = requests.find((item) => item.id === id);
+    if (!request || request.status !== STATUS.PROVISIONING) {
+      const error = new Error("Signup request is not awaiting password reconciliation");
+      error.code = "SIGNUP_PASSWORD_RECONCILIATION_NOT_REQUIRED";
+      throw error;
+    }
+
+    if (outcome === "committed") {
+      request.status = STATUS.USED;
+      request.usedAt = now.toISOString();
+      await saveSignupRequests(requests);
+      return { request, passwordSetupToken: null };
+    }
+
+    const passwordSetupToken = createPlainToken();
+    request.status = STATUS.APPROVED;
+    request.passwordSetupStartedAt = null;
+    request.passwordSetupEmailSentAt = now.toISOString();
+    request.passwordSetupExpiresAt = addHours(now, passwordSetupTtlHours()).toISOString();
+    request.passwordSetupTokenHash = hashToken(passwordSetupToken);
+    await saveSignupRequests(requests);
+    return { request, passwordSetupToken };
+  });
 }
 
 async function consumeSignupRequestUnlocked(id, now = new Date()) {
@@ -413,6 +492,7 @@ async function purgeExpiredSignupRequests({ retentionDays = 30, now = new Date()
     const requests = await loadSignupRequests();
     const retained = requests.filter((request) => {
       const lifecycleDate = request.usedAt
+        || request.passwordSetupStartedAt
         || request.passwordSetupExpiresAt
         || request.adminApprovalExpiresAt
         || request.emailVerificationExpiresAt
@@ -564,11 +644,13 @@ module.exports = {
   buildApprovalUrl,
   buildPasswordSetupUrl,
   buildVerificationUrl,
+  completePasswordSetup,
   consumeSignupRequest,
   createSignupRequest,
   loadSignupRequests,
   notifyVerifiedSignupRequest,
   purgeExpiredSignupRequests,
+  reconcilePasswordSetup,
   rotateSignupApprovalToken,
   rotateSignupPasswordSetupToken,
   normalizeEmail,

@@ -31,6 +31,7 @@ SIGNUP_REQUEST_RETENTION_DAYS=30
 AUTH_REQUIRED=1
 SIGNUP_ENABLED=0
 SIGNUP_MODE=approval
+POCKETBASE_PROVISIONING_SECRET=replace-with-at-least-32-random-characters
 PUBLIC_BASE_URL=https://trainer.example.com
 ACCESS_APPROVAL_TOKEN=replace-with-a-long-random-secret
 POCKETBASE_URL=http://127.0.0.1:8090
@@ -49,6 +50,10 @@ SIGNUP_APPROVAL_EMAIL=owner@example.com
 ```
 
 These are required when `SIGNUP_MODE=approval`; the app fails closed instead of logging signup links or telling users that email was sent when delivery is not configured.
+
+Approval-mode password setup also requires PocketBase to start with `--hooksDir /opt/cold-call-trainer/pb_hooks` and the same `POCKETBASE_PROVISIONING_SECRET`. Keep that secret in a separate root-owned environment file loaded by both services. PocketBase remains bound to loopback. The hook exposes only exact-email create-or-activate behavior, preserves an existing user's record ID and non-empty name, and never deletes or changes an email. `/api/ready` checks that this scoped capability is authorized before traffic is considered ready.
+
+The setup token is durably reserved before PocketBase is called. If a network failure makes the result uncertain, the original link cannot change the password again. The user should first try the password they chose on the normal login page. The operator must then verify PocketBase and run `npm run signup:reconcile-password -- --request-id <id> --outcome committed` or `--outcome not-committed`; only the confirmed non-commit path rotates and emails a replacement link.
 
 Optional signup link lifetimes:
 
@@ -206,5 +211,7 @@ Use your deployment tool of choice. A safe update should:
 5. Require 200 from `/api/ready` and inspect `/api/health`.
 6. Sign in with a dedicated canary user, start a call, send one synthetic turn, end the call, and verify the method-pack version and evidence-based result.
 7. If the canary fails, disable LLM rendering first; if the failure remains, execute the restore/release rollback above.
+
+For a rollback across the approved-user hook boundary, first set `SIGNUP_MODE=disabled` and restart the trainer so no password setup can enter the old route. Then roll back the application release. Remove the hook or shared provisioning secret only after approval traffic is closed and the previous release is healthy; rolling back to the pre-hook route while leaving approval mode enabled restores the existing-account failure.
 
 Do not publish production SSH commands, hostnames, or live topology in this repo.

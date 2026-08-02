@@ -58,7 +58,7 @@ Chrome is the best browser for mic input because Web Speech API support varies b
 The trainer requires login by default. For per-rep accounts, run PocketBase on loopback:
 
 ```bash
-./pocketbase serve --http 127.0.0.1:8090
+./pocketbase serve --http 127.0.0.1:8090 --hooksDir ./pb_hooks
 ```
 
 Then start the trainer in another terminal:
@@ -81,6 +81,7 @@ To let visitors request access without creating accounts immediately, use approv
 SIGNUP_MODE=approval \
 PUBLIC_BASE_URL="https://trainer.example.com" \
 ACCESS_APPROVAL_TOKEN="replace-with-a-long-random-secret" \
+POCKETBASE_PROVISIONING_SECRET="replace-with-at-least-32-random-characters" \
 SIGNUP_APPROVAL_EMAIL="owner@example.com" \
 SMTP_HOST="smtp-relay.brevo.com" \
 SMTP_PORT="587" \
@@ -90,6 +91,13 @@ SMTP_FROM="trainer@example.com" \
 SMTP_FROM_NAME="Tradesites AI Sales Trainer" \
 POCKETBASE_URL="http://127.0.0.1:8090" \
 npm start
+```
+
+Start PocketBase with the repository's narrow approval hook and the same secret:
+
+```bash
+POCKETBASE_PROVISIONING_SECRET="replace-with-at-least-32-random-characters" \
+./pocketbase serve --http 127.0.0.1:8090 --hooksDir ./pb_hooks
 ```
 
 In approval mode, visitors enter only their email and click `Create Account`. The app sends a verification email. After the visitor verifies their email, `SIGNUP_APPROVAL_EMAIL` receives an approval link. When you approve it, the app emails the visitor a password setup link. They set a password, then log in with email and password. Telegram remains an optional fallback when both Telegram values are configured. Removing `SIGNUP_APPROVAL_EMAIL` restores Telegram-only notifications only when both Telegram values are present; no data rollback is required.
@@ -104,6 +112,13 @@ If approval succeeded but the applicant's password email failed, rotate and rese
 
 ```bash
 npm run signup:resend-password -- --email applicant@example.com
+```
+
+If a provider/network failure leaves password setup in progress, first verify in PocketBase whether the password change committed. Then reconcile by request ID; `not-committed` rotates and emails a replacement link, while `committed` closes the request without issuing another token:
+
+```bash
+npm run signup:reconcile-password -- --request-id <request-id> --outcome committed
+npm run signup:reconcile-password -- --request-id <request-id> --outcome not-committed
 ```
 
 Validate the auth path:
@@ -132,6 +147,7 @@ Copy `.env.example` for local notes. The app reads environment variables directl
 | `SIGNUP_MODE` | `disabled` | `disabled`, `approval`, or `open`. Approval mode requires admin approval before account creation. |
 | `SIGNUP_ENABLED` | `0` | Set `1` only for local signup testing or intentional public registration. |
 | `POCKETBASE_URL` | `http://127.0.0.1:8090` | PocketBase auth endpoint. |
+| `POCKETBASE_PROVISIONING_SECRET` | empty | Required in production approval mode. Shared 32+ character secret for the loopback-only, narrowly scoped approved-user hook. |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:3137` | Public URL used in verification, approval, and password setup links. |
 | `ACCESS_APPROVAL_TOKEN` | empty | Required in approval mode. Server-side secret used to hash per-request admin approval tokens. |
 | `SMTP_HOST` | empty | Preferred email provider path. Use Brevo SMTP relay, for example `smtp-relay.brevo.com`. |
