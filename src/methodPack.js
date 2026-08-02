@@ -5,6 +5,7 @@ const DEFAULT_METHOD_PACK_ID = "hormozi-sales-2026";
 const METHOD_PACKS_DIR = path.join(__dirname, "..", "method-packs");
 const METHOD_REGISTRY = Object.freeze([
   Object.freeze({ id: DEFAULT_METHOD_PACK_ID, version: "1.0.0-beta.3" }),
+  Object.freeze({ id: "jeremy-miner-nepq-ppa", version: "1.0.0-beta.1" }),
 ]);
 
 function readJson(filePath) {
@@ -143,9 +144,11 @@ function validateMethodPack(pack) {
   const sourceSections = Array.isArray(manifest.sourceSections) ? manifest.sourceSections : [];
   const sourceIds = uniqueIds(sourceSections, "source section", errors);
   for (const section of sourceSections) {
-    if (!Number.isInteger(section.startSeconds) || !Number.isInteger(section.endSeconds)) {
-      errors.push(`source section ${section.id || "unknown"} needs integer timestamps`);
-    } else if (section.startSeconds < 0 || section.endSeconds <= section.startSeconds) {
+    const hasTimestamps = Number.isInteger(section.startSeconds) && Number.isInteger(section.endSeconds);
+    const hasLocator = typeof section.locator === "string" && section.locator.trim().length > 0;
+    if (!hasTimestamps && !hasLocator) {
+      errors.push(`source section ${section.id || "unknown"} needs timestamps or a locator`);
+    } else if (hasTimestamps && (section.startSeconds < 0 || section.endSeconds <= section.startSeconds)) {
       errors.push(`source section ${section.id || "unknown"} has an invalid range`);
     }
   }

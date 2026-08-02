@@ -16,10 +16,10 @@ const {
 const { getOpenClawStats, getOpenClawTimeoutMs } = require("./openclawGateway");
 const { scoreTranscript } = require("./scoring");
 const { deleteSkillMemory, getDueDrills, updateSkillMemory } = require("./skillMemory");
-const { generateGauntletPlan, scoreGauntletAnswer, scoreHardNoCleanExit, summarizeGauntlet } = require("./gauntlet");
+const { generateGauntletPlan, responseFingerprint, responseTokenHashes, scoreHardNoCleanExit, scoreSituationAttempt, summarizeGauntlet } = require("./gauntlet");
 const { buildReviewQueue, buildSkillTrends } = require("./reviewQueue");
 const { findApprovedResponse, findApprovedResponseForDrill } = require("./approvedResponses");
-const { buildCoachingSuggestion, HELP_MOVES, inferStage } = require("./objectionPlaybook");
+const { buildCoachingSuggestion, getObjectionById, HELP_MOVES, inferStage } = require("./objectionPlaybook");
 const { deleteProfile, loadProfile, saveProfile } = require("./profileStore");
 const {
   approveSignupRequest,
@@ -53,6 +53,11 @@ const { applyMethodCoaching } = require("./methodCoaching");
 const { createFixedWindowRateLimiter } = require("./rateLimit");
 const { runRetention } = require("./retention");
 const { checkOpenClawGateway } = require("./openclawGateway");
+const {
+  assessMethodReadiness,
+  buildFullCallResults,
+  buildReadinessCallResults,
+} = require("./evalHarness");
 
 function getBrainProvider() {
   if (process.env.OPENCLAW_GATEWAY_URL) return "openclaw";
@@ -828,6 +833,22 @@ function createApp(options = {}) {
     };
   }
 
+  async function attachReadiness(session, sessionMethodPack) {
+    const existing = await listSessions(session.repId || "local");
+    const sessions = [...existing.filter((item) => item.id !== session.id), session];
+    const callResults = buildReadinessCallResults(sessions, sessionMethodPack);
+    const fullCallResults = buildFullCallResults(sessions, sessionMethodPack);
+    session.evaluation.readiness = assessMethodReadiness({
+      methodPack: session.methodPack,
+      callResults,
+      fullCallResults,
+      minimumRealisticCallScore: 70,
+      minimumCallsPerFamily: 3,
+      minimumPassingRate: 0.8,
+    });
+    return session.evaluation.readiness;
+  }
+
   app.get("/api/methods", (_req, res) => {
     const methods = listMethodPacks();
     if (!methods.some((item) => item.id === methodPack.manifest.id && item.version === methodPack.manifest.version)) {
@@ -839,6 +860,31 @@ function createApp(options = {}) {
       });
     }
     res.json({ methods });
+  });
+
+  app.get("/api/readiness", async (req, res, next) => {
+    try {
+      const profile = await loadProfile(req.user);
+      const selectedMethodPack = methodPackForProfile(profile);
+      const sessions = await listSessions(req.user.id);
+      const callResults = buildReadinessCallResults(sessions, selectedMethodPack);
+      const fullCallResults = buildFullCallResults(sessions, selectedMethodPack);
+      res.json({
+        readiness: assessMethodReadiness({
+          methodPack: {
+            id: selectedMethodPack.manifest.id,
+            version: selectedMethodPack.manifest.version,
+          },
+          callResults,
+          fullCallResults,
+          minimumRealisticCallScore: 70,
+          minimumCallsPerFamily: 3,
+          minimumPassingRate: 0.8,
+        }),
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.delete("/api/account-data", async (req, res, next) => {
@@ -986,9 +1032,13 @@ function createApp(options = {}) {
       const scenario = getScenario(req.body.scenarioId || "enterprise-commercial-solar");
       const profile = await loadProfile(req.user);
       const selectedMethodPack = methodPackForProfile(profile);
+      const rounds = Number(req.body.rounds || 5);
+      const priorSessions = await listSessions(req.user.id);
+      const priorGauntletCount = priorSessions.filter((item) => item.gauntlet).length;
       const plan = generateGauntletPlan({
-        rounds: Number(req.body.rounds || 5),
+        rounds,
         playbookId: scenario.objectionPlaybookId,
+        startIndex: priorGauntletCount * rounds,
       });
       const now = new Date().toISOString();
       const firstRound = plan.rounds[0];
@@ -1136,7 +1186,10 @@ function createApp(options = {}) {
         objectionId: round.objectionId,
         objectionType: round.type,
         nearMissFamily: round.nearMissFamily,
-        score: scoreGauntletAnswer(text),
+        situationFamily: round.situationFamily,
+        score: scoreSituationAttempt(text, getObjectionById(round.objectionId), sessionMethodPack),
+        responseFingerprint: responseFingerprint(text),
+        responseTokenHashes: responseTokenHashes(text),
       };
       if (round.type === "hard_no") {
         result.hardNoCleanExit = scoreHardNoCleanExit(text);
@@ -1172,6 +1225,7 @@ function createApp(options = {}) {
           methodPack: sessionMethodPack,
           profile: coachingProfileForSession(session),
         });
+        await attachReadiness(session, sessionMethodPack);
         await updateSkillMemory({ session, evaluation: session.evaluation });
       }
 
@@ -1200,6 +1254,7 @@ function createApp(options = {}) {
         methodPack: sessionMethodPack,
         profile: coachingProfileForSession(session),
       });
+      await attachReadiness(session, sessionMethodPack);
       await updateSkillMemory({ session, evaluation: session.evaluation });
       await saveSession(session);
       res.json({ session });

@@ -283,6 +283,44 @@ function renderScore(evaluation) {
   methodMeta.textContent = `Source-grounded method score · ${confidence} evidence confidence · pack ${packVersion}`;
   wrapper.append(methodMeta);
 
+  const readiness = evaluation.readiness;
+  if (readiness) {
+    const readinessBox = document.createElement("section");
+    readinessBox.className = `readiness ${readiness.ready ? "ready" : "practice"}`;
+    const readinessTitle = document.createElement("h3");
+    readinessTitle.textContent = readiness.ready
+      ? "Ready for a supervised live call"
+      : "Practice required";
+    const readinessSummary = document.createElement("p");
+    readinessSummary.textContent = `${readiness.evidenceCallCount} scored situation attempts for this method.`;
+    const checkLabels = {
+      scenario_family_coverage: "Situation coverage",
+      ethical_gates: "Ethical gates",
+      realistic_call_score_floor: "Call score floor",
+      multi_call_consistency: "Repeat-call consistency",
+      full_call_simulation: "Three complete call simulations",
+    };
+    const readinessList = document.createElement("ul");
+    readiness.checks.forEach((check) => {
+      const item = document.createElement("li");
+      const missing = check.missingFamilies?.length
+        ? ` — missing: ${check.missingFamilies.join(", ").replaceAll("_", " ")}`
+        : "";
+      const statusLabel = check.status === "pass"
+        ? "Passed"
+        : check.status === "review"
+          ? "Needs coach review"
+          : "Not passed";
+      item.textContent = `${statusLabel}: ${checkLabels[check.id] || check.id}${missing}`;
+      readinessList.append(item);
+    });
+    const readinessLimit = document.createElement("p");
+    readinessLimit.className = "muted";
+    readinessLimit.textContent = "Typed practice does not prove live vocal delivery; final sign-off needs a coach-reviewed or supervised call.";
+    readinessBox.append(readinessTitle, readinessSummary, readinessList, readinessLimit);
+    wrapper.append(readinessBox);
+  }
+
   Object.entries(evaluation.categories).forEach(([name, value]) => {
     const row = document.createElement("div");
     row.className = "score-row";
@@ -403,11 +441,23 @@ function renderCoaching(suggestion) {
   }
 
   const list = document.createElement("ul");
-  suggestion.suggestions.forEach((item) => {
+  const guidance = suggestion.methodGuidance || suggestion.suggestions || [];
+  guidance.forEach((item) => {
     const li = document.createElement("li");
     li.textContent = item;
     list.append(li);
   });
+  if (suggestion.situationGuidance?.length) {
+    const situationLabel = document.createElement("strong");
+    situationLabel.textContent = "Situation facts and constraints:";
+    const situationList = document.createElement("ul");
+    suggestion.situationGuidance.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      situationList.append(li);
+    });
+    wrapper.append(situationLabel, situationList);
+  }
   const tryThis = document.createElement("div");
   tryThis.className = "try-this";
   const tryLabel = document.createElement("strong");

@@ -421,6 +421,23 @@ h2 {
   padding: 10px;
 }
 
+.readiness {
+  margin: 1rem 0;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+}
+
+.readiness.ready {
+  border-color: #2f8f5b;
+  background: rgba(47, 143, 91, 0.08);
+}
+
+.readiness.practice {
+  border-color: #c28a2c;
+  background: rgba(194, 138, 44, 0.08);
+}
+
 .note-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

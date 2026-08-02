@@ -200,6 +200,12 @@ test("authenticated reps can list the closed coaching method registry", async ()
         displayName: "Hormozi Sales Operating Method — 2026 Talk Adaptation",
         status: "source-grounded-beta",
       },
+      {
+        id: "jeremy-miner-nepq-ppa",
+        version: "1.0.0-beta.1",
+        displayName: "Jeremy Miner NEPQ — Commercial Solar PPA Adaptation",
+        status: "source-grounded-beta",
+      },
     ]);
   });
 });

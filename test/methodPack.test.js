@@ -21,6 +21,28 @@ test("default Hormozi method pack is versioned and source-grounded", () => {
   assert.ok(pack.manifest.sourceSections.every((section) => Number.isInteger(section.startSeconds)));
 });
 
+test("closed registry lists and loads the source-grounded Jeremy Miner NEPQ PPA method", () => {
+  const method = listMethodPacks().find((item) => item.id === "jeremy-miner-nepq-ppa");
+
+  assert.ok(method, "Jeremy Miner NEPQ must be a selectable registered method");
+  assert.match(method.version, /^1\.0\.0-beta\.\d+$/);
+  assert.match(method.displayName, /Jeremy Miner|NEPQ/i);
+
+  const pack = resolveMethodPack({ id: method.id, version: method.version });
+  const validation = validateMethodPack(pack);
+  assert.equal(validation.valid, true, validation.errors.join("\n"));
+  assert.equal(pack.manifest.id, "jeremy-miner-nepq-ppa");
+  assert.equal(pack.manifest.version, method.version);
+  assert.match(pack.manifest.primarySource.url, /^https:\/\//);
+  assert.ok(pack.manifest.sourceSections.length >= 5);
+  assert.ok(pack.manifest.sourceSections.every((section) => (
+    Number.isInteger(section.startSeconds)
+      && Number.isInteger(section.endSeconds)
+      && section.endSeconds > section.startSeconds
+  ) || (typeof section.locator === "string" && section.locator.trim().length > 0)));
+  assert.equal(pack.coaching.mode, "method_owned");
+});
+
 test("method pack maps the complete in-call framework and ethical gates", () => {
   const pack = loadMethodPack();
   const frameworks = new Set(pack.framework.frameworks.map((item) => item.id));
@@ -102,6 +124,12 @@ test("closed method registry lists only allowlisted versioned coaching methods",
       id: "hormozi-sales-2026",
       version: "1.0.0-beta.3",
       displayName: "Hormozi Sales Operating Method — 2026 Talk Adaptation",
+      status: "source-grounded-beta",
+    },
+    {
+      id: "jeremy-miner-nepq-ppa",
+      version: "1.0.0-beta.1",
+      displayName: "Jeremy Miner NEPQ — Commercial Solar PPA Adaptation",
       status: "source-grounded-beta",
     },
   ]);

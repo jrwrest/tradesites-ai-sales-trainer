@@ -28,6 +28,13 @@ function applyMethodCoaching({ suggestion, methodPack, profile = {} }) {
     error.code = "METHOD_PACK_INVALID";
     throw error;
   }
+  const methodTemplate = suggestion.terminal && technique.exitTemplate
+    ? technique.exitTemplate
+    : technique.template;
+  const methodGuidance = [...(technique.guidance || [])];
+  const situationGuidance = Object.values(suggestion.industryFacts || {})
+    .filter((value) => typeof value === "string" && value.trim());
+  const methodExample = renderCoachingTemplate(methodTemplate, profile, methodPack);
   return {
     ...suggestion,
     methodMetadata: {
@@ -37,11 +44,12 @@ function applyMethodCoaching({ suggestion, methodPack, profile = {} }) {
       frameworkLabel: framework.label,
     },
     methodPrompt: technique.prompt,
-    suggestions: [
-      ...(technique.guidance || []),
-      ...(suggestion.suggestions || []),
-    ],
-    tryThis: renderCoachingTemplate(suggestion.tryThis || technique.template, profile, methodPack),
+    methodGuidance,
+    situationGuidance,
+    methodExample,
+    situationExample: null,
+    suggestions: [...methodGuidance, ...situationGuidance],
+    tryThis: methodExample,
   };
 }
 

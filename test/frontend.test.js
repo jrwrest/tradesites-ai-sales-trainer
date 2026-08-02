@@ -118,3 +118,17 @@ test("completed gauntlets render the pinned method evaluation and drill", async 
   assert.match(submitMessage, /renderScore\(state\.session\.evaluation\)/);
   assert.doesNotMatch(submitMessage, /recommendedDrill: `Repeat the gauntlet/);
 });
+
+test("score card explains supervised-live-call readiness and remaining gates", async () => {
+  const appJs = await fs.readFile(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  const renderScore = appJs.slice(appJs.indexOf("function renderScore("), appJs.indexOf("function renderCoaching("));
+
+  assert.match(renderScore, /evaluation\.readiness/);
+  assert.match(renderScore, /Ready for a supervised live call/);
+  assert.match(renderScore, /Practice required/);
+  assert.match(renderScore, /scenario_family_coverage/);
+  assert.match(renderScore, /ethical_gates/);
+  assert.match(renderScore, /realistic_call_score_floor/);
+  assert.match(renderScore, /multi_call_consistency/);
+  assert.match(renderScore, /typed practice does not prove live vocal delivery/i);
+});

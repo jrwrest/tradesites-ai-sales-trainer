@@ -153,6 +153,84 @@ const enterpriseObjectionPlaybook = {
   ],
 };
 
+function commercialSolarSituation({
+  id,
+  family,
+  stage,
+  type,
+  text,
+  fact,
+  methodCoachingKey,
+  terminal = false,
+}) {
+  const situation = {
+    id,
+    family,
+    stage,
+    type,
+    triggerAfterTurns: stage === "opener" ? 0 : stage === "permission" ? 1 : 2,
+    text,
+    coaching: [fact],
+    tryThis: "",
+    terminal: Boolean(terminal),
+    methodCoachingKey,
+    industryFacts: { boundary: fact },
+  };
+  situation.recommendedMove = recommendedMoveForObjection(situation);
+  return Object.freeze(situation);
+}
+
+// The supplied Solar Future Scotland PPA playbook is used here only as the
+// situation/fact layer. Alex and Jeremy method packs independently own how a
+// rep is coached and scored through the same prospect condition.
+const COMMERCIAL_SOLAR_SITUATIONS = Object.freeze([
+  commercialSolarSituation({ id: "gatekeeper-routing", family: "gatekeeper", stage: "opener", type: "gatekeeper", text: "What company is this, what is the call about, and who are you trying to reach?", fact: "A gatekeeper may route the call but should not be misled about identity or purpose.", methodCoachingKey: "identity_and_permission", tryThis: "It is {repName} from {companyName}, calling about a commercial energy fit check. Who normally handles electricity contracts or site energy projects?" }),
+  commercialSolarSituation({ id: "send-information", family: "send_info", stage: "permission", type: "dismissive", text: "Send the information by email and I will look at it if it is relevant.", fact: "A useful email depends on one or two fit facts; a generic brochure does not qualify the site.", methodCoachingKey: "clarify_before_email", tryThis: "Of course. To make it relevant, may I check one thing first: is the building owned or leased?" }),
+  commercialSolarSituation({ id: "existing-solar", family: "existing_solar", stage: "discovery", type: "existing_solution", text: "We already have solar, so there is nothing else to discuss.", fact: "Existing solar may still leave expansion, battery, export, tariff, or additional-site opportunities, but those must be verified.", methodCoachingKey: "existing_solution_gap", tryThis: "That may mean this is already covered. Is the current system meeting most daytime demand, or is there an unreviewed site or expansion need?" }),
+  commercialSolarSituation({ id: "prior-solar-review", family: "prior_solar", stage: "discovery", type: "existing_solution", text: "We looked at solar before and decided not to proceed.", fact: "A prior review may have failed for roof, payback, funding, timing, or stakeholder reasons; do not assume which.", methodCoachingKey: "prior_attempt_reason", tryThis: "Understood. What was the main reason it did not move forward at the time?" }),
+  commercialSolarSituation({ id: "lease-landlord", family: "lease_landlord", stage: "qualification", type: "authority", text: "We lease the building and the landlord controls the roof.", fact: "Roof rights and landlord consent are genuine fit and authority constraints.", methodCoachingKey: "landlord_route", tryThis: "That makes sense. Is landlord involvement realistic, or should we close this site off?" }),
+  commercialSolarSituation({ id: "price-cost", family: "price_cost", stage: "commercial", type: "commercial_risk", text: "What will this cost us, and do we need capital available?", fact: "Capex and funded/PPA routes have different ownership, payment, term, and risk structures; neither should be described as free.", methodCoachingKey: "commercial_model", tryThis: "It depends on whether capex or a funded route fits. Before quoting anything, may I check your spend and site-control position?" }),
+  commercialSolarSituation({ id: "credibility-catch", family: "credibility_catch", stage: "commercial", type: "commercial_risk", text: "This sounds too good to be true. Where is the catch?", fact: "PPA economics depend on demand, tariff, system output, contract terms, roof suitability, and provider diligence; savings are not guaranteed.", methodCoachingKey: "risk_transparency", tryThis: "That is a fair concern. The trade-offs are in site fit, output assumptions, and the contract terms. Which part would you want verified first?" }),
+  commercialSolarSituation({ id: "long-contract", family: "long_contract", stage: "commercial", type: "commercial_risk", text: "We will not lock the business into a long energy contract.", fact: "A PPA can involve a long-term commitment; term, price mechanics, break rights, and property plans require review.", methodCoachingKey: "contract_term", tryThis: "Understood. Is the concern the term itself, future property plans, or the price and exit terms inside it?" }),
+  commercialSolarSituation({ id: "busy-callback", family: "busy_callback", stage: "permission", type: "timing", text: "I am busy and about to go into a meeting. Call another time.", fact: "A callback is only useful when a specific time and appropriate contact are agreed.", methodCoachingKey: "specific_callback", tryThis: "No problem. Is there a better day and time, or would you prefer I close this off?" }),
+  commercialSolarSituation({ id: "hard-opt-out", family: "source_opt_out", stage: "permission", type: "hard_no", text: "Where did you get my number? Do not call me again and remove me from your list.", fact: "An explicit do-not-call request is terminal and must be actioned without further persuasion.", methodCoachingKey: "hard_no_exit", tryThis: "Understood. I will remove you and will not call again. Goodbye.", terminal: true }),
+  commercialSolarSituation({ id: "broker-incumbent", family: "broker_incumbent", stage: "discovery", type: "existing_solution", text: "Our energy broker handles all of this for us.", fact: "An incumbent broker may own tariff procurement but may or may not cover onsite generation, funded solar, or site engineering.", methodCoachingKey: "incumbent_scope", tryThis: "That is sensible. Do they also cover onsite generation and funded solar, or mainly the supply contract?" }),
+  commercialSolarSituation({ id: "tied-contract-renewal", family: "tied_contract_renewal", stage: "qualification", type: "timing", text: "We are tied into our electricity contract, so nothing can change until renewal.", fact: "Supply-contract renewal and onsite-generation timing can interact, but current contract restrictions and notice dates must be checked.", methodCoachingKey: "renewal_trigger", tryThis: "When is the next renewal or notice point, and has anyone checked whether onsite generation can be assessed before then?" }),
+  commercialSolarSituation({ id: "roof-site-move-size", family: "roof_site_move_size", stage: "qualification", type: "qualification", text: "The roof may be old, the site is small, and we might move premises.", fact: "Roof condition, usable area, structural suitability, demand, tenure, and planned relocation can each make a site unfit.", methodCoachingKey: "site_fit", tryThis: "Those may rule it out. Which is most definite today: roof condition, usable size, or the move plan?" }),
+  commercialSolarSituation({ id: "disruption-performance-maintenance-loan", family: "disruption_performance_maintenance_loan", stage: "commercial", type: "commercial_risk", text: "I am concerned about disruption, underperformance, maintenance, and whether this is really a loan.", fact: "Installation disruption, performance assumptions, maintenance obligations, and financing structure must be separated and evidenced in the proposed route.", methodCoachingKey: "delivery_risk", tryThis: "Those are four different risks. Which one would stop the project even if the others were satisfactory?" }),
+  commercialSolarSituation({ id: "stakeholder-approval", family: "stakeholder", stage: "qualification", type: "authority", text: "The finance director, landlord, and operations team would all need to agree.", fact: "Complex B2B energy decisions can require financial, property, operational, procurement, and board participation.", methodCoachingKey: "decision_map", tryThis: "How would those people normally evaluate a project like this, and who should join the first fit review?" }),
+  commercialSolarSituation({ id: "numbers-proof", family: "numbers", stage: "commercial", type: "commercial_risk", text: "Send me the numbers and proof before I agree to any meeting.", fact: "Site-specific numbers require adequate usage, tariff, roof, and commercial inputs; indicative claims must be labelled and sourced.", methodCoachingKey: "evidence_requirements", tryThis: "That is reasonable. What evidence would make an initial review worthwhile, and which site inputs can be shared safely?" }),
+  commercialSolarSituation({ id: "esg-priority", family: "esg", stage: "discovery", type: "qualification", text: "We are already green enough and solar is not a current priority.", fact: "ESG interest alone does not establish financial, technical, or timing fit.", methodCoachingKey: "priority_trigger", tryThis: "Understood. Is there any commercial or contract trigger that would change that, or should I close this off?" }),
+  commercialSolarSituation({ id: "email-follow-up-context", family: "gatekeeper", stage: "opener", type: "gatekeeper", text: "I do not remember your email. Remind me what this is about.", fact: "An email follow-up must accurately restate the prior message and must not imply engagement that did not occur.", methodCoachingKey: "email_context", tryThis: "Of course. I sent a note about checking whether this site's power use and roof position make a funded solar review relevant. May I give you the 20-second version?" }),
+  commercialSolarSituation({ id: "roof-data-source", family: "numbers", stage: "opener", type: "gatekeeper", text: "What roof data are you referring to, and where did you get it?", fact: "Public or supplied site data can be incomplete; imagery must not be presented as proof of ownership, condition, or solar status.", methodCoachingKey: "data_provenance", tryThis: "It was only a preliminary public-site check, not proof of suitability. Would you prefer I explain the source, or close the record?" }),
+  commercialSolarSituation({ id: "wrong-person-route", family: "gatekeeper", stage: "opener", type: "gatekeeper", text: "You have the wrong person. I do not deal with energy or the building.", fact: "The rep should seek an appropriate role, not pressure an unrelated contact to act as a decision-maker.", methodCoachingKey: "role_routing", tryThis: "Thanks for saying. Which role normally handles electricity contracts, estates, or energy projects?" }),
+  commercialSolarSituation({ id: "unit-rate-unknown", family: "numbers", stage: "qualification", type: "qualification", text: "I do not know our unit rate or annual electricity spend.", fact: "Rough bands can screen fit, but precise savings require verified bills, interval data, tariffs, and assumptions.", methodCoachingKey: "spend_band", tryThis: "No problem. Are you roughly above or below GBP 50,000 a year, or should we involve whoever holds the bills?" }),
+  commercialSolarSituation({ id: "low-electricity-spend", family: "roof_site_move_size", stage: "qualification", type: "qualification", text: "Our electricity spend is only about GBP 15,000 a year.", fact: "Low spend can make a commercial PPA or paid diagnostic uneconomic; the trainer should allow clean disqualification.", methodCoachingKey: "spend_disqualify", tryThis: "That may put the site below the useful threshold, so I would rather close it than waste your time. Is there a larger site in the group?" }),
+  commercialSolarSituation({ id: "roof-condition-old", family: "roof_site_move_size", stage: "qualification", type: "qualification", text: "The roof is old and likely needs replacing within a few years.", fact: "Roof condition and replacement timing must be resolved before a long-life solar installation.", methodCoachingKey: "roof_condition", tryThis: "That may make now the wrong time. Is the replacement planned, or should this site be ruled out?" }),
+  commercialSolarSituation({ id: "limited-roof-area", family: "roof_site_move_size", stage: "qualification", type: "qualification", text: "There is very little usable roof space because of plant and skylights.", fact: "Usable roof area, shading, access, structure, fire routes, and demand determine technical fit.", methodCoachingKey: "usable_area", tryThis: "Understood. Has usable area been measured, or is it clearly too restricted to justify a site check?" }),
+  commercialSolarSituation({ id: "low-daytime-demand", family: "roof_site_move_size", stage: "qualification", type: "qualification", text: "Most of our power use is overnight, not during daylight hours.", fact: "Daytime consumption and export economics materially affect behind-the-meter solar and PPA fit.", methodCoachingKey: "load_profile", tryThis: "That could make the site a poor fit. Is there meaningful daytime baseload, battery interest, or another site with daytime use?" }),
+  commercialSolarSituation({ id: "no-budget-capex", family: "price_cost", stage: "commercial", type: "commercial_risk", text: "There is no capital budget for solar this year.", fact: "No capex budget does not automatically prove PPA fit; funded terms and site economics still require qualification.", methodCoachingKey: "funding_route", tryThis: "Understood. Would a funded route be worth assessing, or is there no appetite for a long-term energy agreement either?" }),
+  commercialSolarSituation({ id: "ppa-price-question", family: "price_cost", stage: "commercial", type: "commercial_risk", text: "What price per kilowatt-hour would we actually pay?", fact: "A credible PPA price requires site, demand, generation, term, indexation, and provider inputs; do not fabricate a rate.", methodCoachingKey: "ppa_price", tryThis: "I cannot give a responsible rate without the site inputs. Which commercial terms would you need defined before sharing data?" }),
+  commercialSolarSituation({ id: "moving-premises", family: "roof_site_move_size", stage: "qualification", type: "timing", text: "We expect to move out of this building within two years.", fact: "A near-term move can conflict with installation life and long-term contractual commitments.", methodCoachingKey: "relocation_fit", tryThis: "That may rule this site out. Is the next premises known, or should we close this until the move is complete?" }),
+  commercialSolarSituation({ id: "panel-aesthetics", family: "disruption_performance_maintenance_loan", stage: "commercial", type: "commercial_risk", text: "The directors will object to how panels look on the building.", fact: "Planning, heritage, visibility, and stakeholder preferences may constrain design; aesthetics should not be dismissed.", methodCoachingKey: "aesthetic_constraint", tryThis: "Understood. Is visibility a fixed no, or would a low-visibility design still be considered?" }),
+  commercialSolarSituation({ id: "installation-disruption", family: "disruption_performance_maintenance_loan", stage: "commercial", type: "commercial_risk", text: "We cannot allow installation to disrupt production.", fact: "Access, outages, safety, roof works, and programme constraints require site-specific planning.", methodCoachingKey: "disruption_plan", tryThis: "That is a legitimate constraint. Which operations or outage conditions would any design have to meet?" }),
+  commercialSolarSituation({ id: "output-underperformance", family: "disruption_performance_maintenance_loan", stage: "commercial", type: "commercial_risk", text: "What protects us if the system produces less than forecast?", fact: "Forecast methodology, degradation, availability, metering, guarantees, remedies, and exclusions belong in technical and contractual diligence.", methodCoachingKey: "performance_risk", tryThis: "That needs to be evidenced in the forecast and contract. Which protection or remedy would your team expect to see?" }),
+  commercialSolarSituation({ id: "maintenance-responsibility", family: "disruption_performance_maintenance_loan", stage: "commercial", type: "commercial_risk", text: "Who maintains it and pays when something fails?", fact: "Maintenance ownership, response standards, insurance, access, replacement obligations, and costs vary by commercial structure.", methodCoachingKey: "maintenance_terms", tryThis: "That depends on the ownership model and contract. Would your priority be fixed responsibility, response time, or cost exposure?" }),
+  commercialSolarSituation({ id: "loan-confusion", family: "disruption_performance_maintenance_loan", stage: "commercial", type: "commercial_risk", text: "Is a PPA just a loan secured against our roof?", fact: "A PPA is not automatically a loan, but legal structure, security, property rights, and accounting treatment require professional review.", methodCoachingKey: "finance_structure", tryThis: "It should not be described as a loan without reviewing the documents. Would finance need a structure summary before any site work?" }),
+  commercialSolarSituation({ id: "finance-director-not-present", family: "stakeholder", stage: "close", type: "authority", text: "I cannot agree to this without the finance director.", fact: "The finance director's authority must be respected and the next step should include the evidence they require.", methodCoachingKey: "finance_route", tryThis: "Of course. What would the finance director need to see, and should they join the next fit review?" }),
+  commercialSolarSituation({ id: "send-numbers-only", family: "numbers", stage: "close", type: "dismissive", text: "Do not book a meeting. Just email the projected savings.", fact: "Projected savings without verified inputs can mislead; the rep must label indicative evidence and request only necessary data.", methodCoachingKey: "numbers_before_meeting", tryThis: "I can send the assumptions and required inputs, but not invent a site saving. Which data can your team verify first?" }),
+  commercialSolarSituation({ id: "already-net-zero-plan", family: "esg", stage: "discovery", type: "existing_solution", text: "We already have a net-zero plan and approved suppliers.", fact: "An ESG plan or supplier panel may close the route or create a formal procurement path; neither proves a current gap.", methodCoachingKey: "esg_incumbent", tryThis: "That may mean this is covered. Is onsite generation already included and procured, or should I close this off?" }),
+  commercialSolarSituation({ id: "specific-callback", family: "busy_callback", stage: "close", type: "timing", text: "Call me after our board meeting next month.", fact: "A callback should record the real trigger, date, owner, and purpose rather than creating an indefinite chase.", methodCoachingKey: "callback_trigger", tryThis: "Certainly. What date follows the board meeting, and what should we be ready to discuss then?" }),
+]);
+
+const commercialSolarSituationPlaybook = {
+  id: "commercial-solar-situation-catalog",
+  name: "Commercial Solar Real-Call Situation Catalog",
+  maxObjectionsPerCall: 5,
+  sourceNotes: ["Shared solar facts; coaching and scoring are owned by the selected method pack."],
+  objections: [...COMMERCIAL_SOLAR_SITUATIONS],
+};
+
 const manufacturerPowerPaybackPlaybook = {
   id: "manufacturer-power-payback-report",
   name: "Manufacturer Power Payback Report Objection Gauntlet",
@@ -279,7 +357,11 @@ const manufacturerPowerPaybackPlaybook = {
   ],
 };
 
-const PLAYBOOKS = [enterpriseObjectionPlaybook, manufacturerPowerPaybackPlaybook];
+const PLAYBOOKS = [
+  enterpriseObjectionPlaybook,
+  manufacturerPowerPaybackPlaybook,
+  commercialSolarSituationPlaybook,
+];
 
 const HARD_NO_PATTERN =
   /\b(take (us|me) off|remove (us|me)|do not call|don't call|no requirement|not interested|wasting your time|stop calling)\b/i;
@@ -405,6 +487,9 @@ function buildCoachingSuggestion({ scenario, session }) {
       objectionId: objection.id,
       objectionType: objection.type,
       recommendedMove: recommendedMoveForObjection(objection),
+      methodCoachingKey: objection.methodCoachingKey || `move_${recommendedMoveForObjection(objection)}`,
+      industryFacts: objection.industryFacts || {},
+      terminal: Boolean(objection.terminal),
       title: objection.terminal ? "Respect the hard no" : `Handle: ${objection.text}`,
       suggestions: objection.coaching,
       tryThis: objection.tryThis,
@@ -544,12 +629,16 @@ function buildCoachingSuggestion({ scenario, session }) {
     objectionId: null,
     objectionType: null,
     recommendedMove: recommendedMoveForStage(stage),
+    methodCoachingKey: `stage_${stage}`,
+    industryFacts: {},
+    terminal: false,
     source: scenario.objectionPlaybookId || "playbook",
     ...fallback[stage],
   };
 }
 
 module.exports = {
+  COMMERCIAL_SOLAR_SITUATIONS,
   HARD_NO_PATTERN,
   HELP_MOVES,
   PLAYBOOKS,

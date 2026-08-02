@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "jeremy-miner-nepq-ppa",
+  "version": "1.0.0-beta.1",
+  "displayName": "Jeremy Miner NEPQ — Commercial Solar PPA Adaptation",
+  "status": "source-grounded-beta",
+  "updatedAt": "2026-08-02",
+  "primarySource": {
+    "creator": "Jeremy Miner / 7th Level",
+    "title": "How to Sell More Than 99% Of People (3 Hour Masterclass)",
+    "url": "https://www.youtube.com/watch?v=8ttzQ5eougI"
+  },
+  "sourceSections": [
+    { "id": "connecting", "label": "Connecting and permission questions", "locator": "Official masterclass: connecting stage and low-pressure opening" },
+    { "id": "situation", "label": "Situation questions", "locator": "Official masterclass: current situation and context questions" },
+    { "id": "problem", "label": "Problem-awareness questions", "locator": "Official masterclass: helping the prospect identify the problem" },
+    { "id": "solution", "label": "Solution-awareness questions", "locator": "Official masterclass: prospect-defined desired change" },
+    { "id": "consequence", "label": "Consequence questions", "locator": "Official masterclass: implications of leaving the problem unchanged" },
+    { "id": "qualifying", "label": "Qualifying questions", "locator": "Official masterclass and B2B lessons: desire, means, timing, and decision path" },
+    { "id": "presentation", "label": "Transition and presentation", "locator": "Official masterclass: permission-led transition and problem-mapped presentation" },
+    { "id": "commitment", "label": "Commitment questions", "locator": "Official masterclass: conditional commitment, reasons, and concrete next step" },
+    { "id": "objections", "label": "Objection prevention and clarification", "locator": "Official masterclass: clarify before resolving and stay detached from outcome" }
+  ],
+  "adaptationNotice": "Independent, source-grounded commercial-solar adaptation. It is not endorsed by Jeremy Miner or 7th Level. Solar facts come from the supplied Solar Future Scotland PPA situation playbook; method language is an original NEPQ adaptation, not transcript text.",
+  "scope": {
+    "included": ["cold calls", "discovery", "commercial-solar qualification", "PPA objections", "B2B decision paths", "commitment questions"],
+    "excluded": ["legal advice", "regulated-product suitability", "guaranteed savings", "coercive selling"]
+  },
+  "ethicalBoundaries": [
+    "Use neutral, truthful questions; do not manipulate emotion or manufacture a problem.",
+    "Respect explicit opt-outs and end the call without another sales question.",
+    "Do not bypass landlords, finance, procurement, or other real decision participants.",
+    "Verify commercial and site fit before asking for commitment.",
+    "Present only facts supported by the prospect's situation and approved evidence."
+  ]
+}

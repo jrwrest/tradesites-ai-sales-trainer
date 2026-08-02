@@ -22,9 +22,9 @@ const DETECTORS = {
   },
   ppp_plan: {
     positive: [
-      ["sets sequence", /\b(first .{0,100} then|a few questions.{0,100}(?:then|after))\b/i],
-      ["defines fit decision", /\b(fit or (?:no fit|not)|makes sense or not|decide whether)\b/i],
-      ["checks permission", /\b(fair\?|sound (?:fair|good)|okay\?|is that okay|can I take \d+ seconds)\b/i],
+      ["sets sequence", /\b(first .{0,100} then|a (?:few|couple of) questions.{0,100}(?:then|after|work out))\b/i],
+      ["defines fit decision", /\b(fit or (?:no fit|not)|makes sense or not|decide whether|whether it is worth (?:a look|continuing))\b/i],
+      ["checks permission", /\b(fair\?|sound (?:fair|good)|okay\?|is that okay|can I take \d+ seconds|would you be opposed)\b/i],
     ],
     counter: [["pitches without a mutual plan", /\b(just listen|you need to hear this)\b/i]],
   },
@@ -33,11 +33,12 @@ const DETECTORS = {
       ["asks why now", /\b(what prompted|why now|what changed|why (?:is|does) this matter now)\b/i],
       ["asks desired outcome", /\b(what outcome|what are you trying|what would you like|where (?:do you|would you) want)\b/i],
       ["asks current state", /\b(how are you currently|what happens today|what are you doing now)\b/i],
+      ["asks current site state", /\bhow is .{0,70}(?:today|currently|powered)\b/i],
     ],
     counter: [["assumes the motive", /\bI know exactly why you need this\b/i]],
   },
   closer_label: {
-    positive: [["summarizes and verifies the gap", /\b(so it sounds like|what I(?:'m| am) hearing|if I heard you|so the gap is|have I got that right|is that (?:right|fair|accurate))\b/i]],
+    positive: [["summarizes and verifies the gap", /\b(so it sounds like|what I(?:'m| am) hearing|if I heard you|so the gap is|based on what you said|have I got that right|is that (?:right|fair|accurate)|fair read)\b/i]],
     counter: [["declares an unverified diagnosis", /\bthe problem is obviously\b/i]],
   },
   closer_overview_pain: {
@@ -48,11 +49,11 @@ const DETECTORS = {
     counter: [["manufactures fear", /\b(you should be terrified|everything will collapse|you'll regret it forever)\b/i]],
   },
   bant_budget: {
-    positive: [["verifies resources", /\b(budget|investment range|resources|finance support|commercial path|afford|funding)\b/i]],
+    positive: [["verifies resources", /\b(budget|investment range|resources|finance support|commercial path|afford|funding|electricity spend)\b/i]],
     counter: [["assumes affordability", /\byou can obviously afford\b/i]],
   },
   bant_authority: {
-    positive: [["maps authority", /\b(who .{0,60}(?:approv\w*|decid\w*|sign\w*|influenc\w*)|approval path|decision[- ]maker|which stakeholders?|finance.{0,30}approv\w*)\b/i]],
+    positive: [["maps authority", /\b(who .{0,60}(?:approv\w*|decid\w*|sign\w*|influenc\w*|need to see|involved)|who besides|approval path|decision[- ]maker|which stakeholders?|finance.{0,30}approv\w*)\b/i]],
     counter: [["encourages bypassing authority", /\b(don't need (?:them|the board)|without (?:their|them)|ignore procurement|you can decide alone)\b/i]],
   },
   bant_need: {
@@ -124,6 +125,93 @@ const DETECTORS = {
     counter: [["forces a unilateral enterprise decision", /\b(ignore procurement|sign without (?:legal|finance|the board)|you can decide alone)\b/i]],
   },
 };
+
+const JEREMY_DETECTORS = {
+  nepq_permission_open: {
+    positive: [["opens with low-pressure permission", /\b(would (?:you be opposed|it be okay)|is it okay|can I take|may I|okay if|couple of questions)\b/i]],
+    counter: [["forces attention", /\b(listen to me|you need to hear|do not hang up)\b/i]],
+  },
+  nepq_neutral_language: {
+    positive: [["uses neutral possibility language", /\b(not sure|might|possibly|could|worth a look|if anything|whether)\b/i]],
+    counter: [["uses pressure certainty", /\b(you need|obviously|definitely|must buy|no-brainer)\b/i]],
+  },
+  nepq_situation_question: {
+    positive: [["asks about current situation", /\b(how (?:is|are|do).{0,70}(?:today|currently|powered|handling)|what (?:is|are|does).{0,70}(?:today|currently)|roughly what|electricity spend|site (?:owned|leased))\b/i]],
+    counter: [["assumes current situation", /\b(I already know exactly how you)\b/i]],
+  },
+  nepq_problem_awareness: {
+    positive: [["asks where the issue affects them", /\b(where does .{0,70}(?:impact|affect)|what (?:isn't|is not) working|what problem|what concerns? you|keeps? (?:increasing|rising))\b/i]],
+    counter: [["declares the prospect's problem", /\b(your problem is|I know your problem)\b/i]],
+  },
+  nepq_probe_clarify: {
+    positive: [["probes the prospect's wording", /\b(how so|in what way|what do you mean|when you say|what have you tried|tell me more)\b/i]],
+    counter: [["jumps from a vague answer to pitch", /\b(that means you need|so buy)\b/i]],
+  },
+  nepq_solution_awareness: {
+    positive: [["asks prospect to define better outcome", /\b(what would (?:change|improve|that do)|how would .{0,60}(?:help|change)|if you could .{0,50}what)\b/i]],
+    counter: [["imposes desired state", /\b(what you really want is)\b/i]],
+  },
+  nepq_consequence_question: {
+    positive: [["explores consequence of no change", /\b(what happens .{0,80}(?:if|when)|if nothing changes|stayed the same|next (?:twelve|12) months|effect would that have)\b/i]],
+    counter: [["manufactures fear", /\b(disaster|terrified|everything will collapse|regret it forever)\b/i]],
+  },
+  nepq_desire_qualify: {
+    positive: [["qualifies priority or timing", /\b(how important|how much of a priority|why now|when would|timing|renewal|notice point)\b/i]],
+    counter: [["invents urgency", /\b(today only|last chance|expires in an hour)\b/i]],
+  },
+  nepq_means_qualify: {
+    positive: [["qualifies commercial means", /\b(spend|budget|investment|funded route|finance support|above or below|capital)\b/i]],
+    counter: [["assumes means", /\b(obviously afford|money is no issue)\b/i]],
+  },
+  nepq_decision_path: {
+    positive: [["maps decision participants", /\b(who (?:besides|else|would|normally)|decision .{0,40}(?:made|process)|need to be involved|approve|finance|procurement|landlord)\b/i]],
+    counter: [["bypasses decision path", /\b(ignore (?:finance|procurement|the landlord)|you can decide alone|do not need approval)\b/i]],
+  },
+  nepq_permission_transition: {
+    positive: [["asks permission to explain", /\b(would it be (?:okay|appropriate) (?:if I|to) (?:share|explain)|may I (?:share|explain)|open to (?:hearing|seeing))\b/i]],
+    counter: [["pitches without permission", /\b(let me tell you all about|here are all the features)\b/i]],
+  },
+  nepq_problem_mapped_presentation: {
+    positive: [["maps explanation to prospect facts", /\b(based on what you said|because you (?:said|mentioned)|what you described|rising spend is|so that would address)\b/i]],
+    counter: [["uses generic feature pitch", /\b(our product has .{0,80}features|let me walk through every feature)\b/i]],
+  },
+  nepq_conditional_commitment: {
+    positive: [["uses conditional commitment", /\b(could (?:possibly |this )?be|might be worth|do you feel .{0,50}could|would it be appropriate to book)\b/i]],
+    counter: [["forces commitment", /\b(sign today|you have to commit|no reason not to buy)\b/i]],
+  },
+  nepq_commitment_reason: {
+    positive: [["elicits prospect-owned reason", /\b(why (?:do you feel|would that|though)|what makes you feel)\b/i]],
+    counter: [["argues for commitment", /\b(the reason you should)\b/i]],
+  },
+  nepq_calendar_next_step: {
+    positive: [["sets a concrete next step", /\b(book|schedule|meet).{0,90}\b(monday|tuesday|wednesday|thursday|friday|\d{1,2}(?::\d{2})?)\b/i]],
+    counter: [["leaves vague follow-up", /\b(someone will get in touch sometime)\b/i]],
+  },
+  nepq_objection_clarify: {
+    positive: [["clarifies before resolving", /\b(when you say|what specifically|what concerns you most|help me understand|which part)\b/i]],
+    counter: [["instantly rebuts", /\b(that is wrong|no, you are wrong|not true at all)\b/i]],
+  },
+  nepq_objection_prevention: {
+    positive: [["checks unresolved concern", /\b(anything else|remaining concern|what else would|before we .{0,30}what)\b/i]],
+    counter: [["uses canned rebuttal", /\b(the answer to that objection is)\b/i]],
+  },
+  nepq_hard_no_clean_exit: { positive: [], counter: [] },
+};
+
+const METHOD_EVALUATOR_CONFIG = Object.freeze({
+  "hormozi-sales-2026": {
+    detectors: DETECTORS,
+    objectionScoped: new Set(["closer_explain_concerns", "objection_isolation", "detail_question_intent", "aaa_acknowledge", "aaa_associate", "aaa_ask"]),
+    hardNoBehaviorId: "hard_no_clean_exit",
+    authorityBehaviorId: "bant_authority",
+  },
+  "jeremy-miner-nepq-ppa": {
+    detectors: JEREMY_DETECTORS,
+    objectionScoped: new Set(["nepq_objection_clarify", "nepq_objection_prevention"]),
+    hardNoBehaviorId: "nepq_hard_no_clean_exit",
+    authorityBehaviorId: "nepq_decision_path",
+  },
+});
 
 function normalizeTurns(turns = []) {
   return turns.map((turn, turnIndex) => {
@@ -201,6 +289,12 @@ function evaluateHardNoBehavior(hardNo) {
 }
 
 function evaluateMethod({ turns = [], scenario = null, methodPack = loadMethodPack(), claimAudit = null } = {}) {
+  const evaluatorConfig = METHOD_EVALUATOR_CONFIG[methodPack.manifest.id];
+  if (!evaluatorConfig) {
+    const error = new Error(`No evaluator registered for ${methodPack.manifest.id}`);
+    error.code = "METHOD_EVALUATOR_UNAVAILABLE";
+    throw error;
+  }
   const normalizedTurns = normalizeTurns(turns);
   const repTurns = normalizedTurns.filter((turn) => turn.role === "rep");
   const customerTurns = normalizedTurns.filter((turn) => turn.role === "customer");
@@ -210,7 +304,7 @@ function evaluateMethod({ turns = [], scenario = null, methodPack = loadMethodPa
     /\b(landlord|do not own|don't own|leased|procurement|legal|security|finance committee|board approval)\b/i.test(turn.text));
 
   const rawBehaviors = methodPack.framework.behaviors.map((definition) => {
-    if (definition.id === "hard_no_clean_exit") {
+    if (definition.id === evaluatorConfig.hardNoBehaviorId) {
       return { ...definition, ...evaluateHardNoBehavior(hardNo) };
     }
     if (definition.id === "prospect_talk_share") {
@@ -230,9 +324,14 @@ function evaluateMethod({ turns = [], scenario = null, methodPack = loadMethodPa
         confidence: confidenceFor(evidence, []),
       };
     }
-    const detector = DETECTORS[definition.id] || {};
+    const detector = evaluatorConfig.detectors[definition.id];
+    if (!detector) {
+      const error = new Error(`No ${methodPack.manifest.id} detector for ${definition.id}`);
+      error.code = "METHOD_EVALUATOR_INVALID";
+      throw error;
+    }
     let candidateTurns = repTurns;
-    if (["closer_explain_concerns", "objection_isolation", "detail_question_intent", "aaa_acknowledge", "aaa_associate", "aaa_ask"].includes(definition.id)) {
+    if (evaluatorConfig.objectionScoped.has(definition.id)) {
       candidateTurns = objectionTurn
         ? repTurns.filter((turn) => turn.turnIndex > objectionTurn.turnIndex)
         : [];
@@ -249,26 +348,26 @@ function evaluateMethod({ turns = [], scenario = null, methodPack = loadMethodPa
   });
 
   const byId = new Map(rawBehaviors.map((behavior) => [behavior.id, behavior]));
-  const stageReached = {
-    prepare: byId.get("preparation_continuity").evidence.length > 0,
-    open: repTurns.length > 0,
-    diagnose: ["closer_clarify", "closer_label", "closer_overview_pain"].some((id) => byId.get(id).evidence.length > 0),
-    qualify: ["bant_budget", "bant_authority", "bant_need", "bant_timing"].some((id) => byId.get(id).evidence.length > 0),
-    present: ["closer_sell_vacation", "pitch_three_pillars", "pitch_past_attempt_link", "pitch_outcome_focus", "pitch_analogy"].some((id) => byId.get(id).evidence.length > 0),
-    ask: byId.get("clean_ask").evidence.length > 0,
-    resolve: Boolean(objectionTurn),
-    reinforce: ["closer_reinforce", "reinforce_warm_handoff"].some((id) => byId.get(id).evidence.length > 0),
-    enterprise: (Boolean(scenario && /enterprise/i.test(scenario.id || "")) && enterpriseConcern)
-      || byId.get("enterprise_stakeholder_map").evidence.length > 0,
-  };
+  const stageReached = Object.fromEntries(methodPack.framework.stages.map((stage) => [
+    stage.id,
+    stage.id === "open"
+      ? repTurns.length > 0
+      : stage.id === "resolve"
+        ? Boolean(objectionTurn)
+        : stage.behaviorIds.some((id) => (byId.get(id)?.evidence.length || 0) > 0),
+  ]));
+  if (methodPack.manifest.id === "hormozi-sales-2026") {
+    stageReached.enterprise = (Boolean(scenario && /enterprise/i.test(scenario.id || "")) && enterpriseConcern)
+      || (byId.get("enterprise_stakeholder_map")?.evidence.length || 0) > 0;
+  }
 
-  const resolveWhenHardNo = new Set(["aaa_acknowledge", "hard_no_clean_exit"]);
+  const resolveWhenHardNo = new Set(["aaa_acknowledge", evaluatorConfig.hardNoBehaviorId]);
   const behaviors = rawBehaviors.map((behavior) => {
     let applicability = behavior.applicability || (stageReached[behavior.stageId] ? "applicable" : "not_reached");
     if (behavior.stageId === "resolve" && hardNo.observed && !resolveWhenHardNo.has(behavior.id)) {
       applicability = "not_applicable";
     }
-    if (behavior.id === "hard_no_clean_exit" && !hardNo.observed) applicability = "not_applicable";
+    if (behavior.id === evaluatorConfig.hardNoBehaviorId && !hardNo.observed) applicability = "not_applicable";
     return { ...behavior, applicability };
   });
 
@@ -298,6 +397,7 @@ function evaluateMethod({ turns = [], scenario = null, methodPack = loadMethodPa
     behaviors,
     methodPack,
     claimAudit,
+    evaluatorConfig,
   });
   const weights = new Map(methodPack.rubric.stageWeights.map((item) => [item.stageId, item.weight]));
   const scoredStages = stages.filter((stage) => stage.score !== null && weights.has(stage.id));
@@ -347,13 +447,13 @@ function evaluateMethod({ turns = [], scenario = null, methodPack = loadMethodPa
   };
 }
 
-function evaluateCriticalGates({ normalizedTurns, hardNo, behaviors, methodPack, claimAudit }) {
+function evaluateCriticalGates({ normalizedTurns, hardNo, behaviors, methodPack, claimAudit, evaluatorConfig }) {
   const behaviorById = new Map(behaviors.map((behavior) => [behavior.id, behavior]));
   return methodPack.rubric.criticalGates.map((definition) => {
     let status = "not_observed";
     let evidence = [];
     if (definition.id === "respect_hard_no" && hardNo.observed) {
-      const hardNoBehavior = behaviorById.get("hard_no_clean_exit");
+      const hardNoBehavior = behaviorById.get(evaluatorConfig.hardNoBehaviorId);
       evidence = [
         { turnIndex: hardNo.customer.turnIndex, reason: "explicit hard no", excerpt: excerpt(hardNo.customer.text) },
         ...hardNoBehavior.evidence,
@@ -381,7 +481,7 @@ function evaluateCriticalGates({ normalizedTurns, hardNo, behaviors, methodPack,
       if (authorityConcern) {
         evidence = [{ turnIndex: authorityConcern.turnIndex, reason: "real authority requirement stated", excerpt: excerpt(authorityConcern.text) }];
         if (bypass) evidence.push({ turnIndex: bypass.turnIndex, reason: "attempts to bypass authority", excerpt: excerpt(bypass.text) });
-        status = bypass ? "fail" : behaviorById.get("bant_authority").evidence.length ? "pass" : "review";
+        status = bypass ? "fail" : behaviorById.get(evaluatorConfig.authorityBehaviorId)?.evidence.length ? "pass" : "review";
       }
     }
     if (definition.id === "fit_before_commitment") {

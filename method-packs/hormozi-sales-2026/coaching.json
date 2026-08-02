@@ -67,6 +67,7 @@
         "Use only truthful, relevant proof or explanation.",
         "Return the conversation to the prospect with one clear question."
       ],
+      "exitTemplate": "Understood. I will close this off and make sure we do not call again. Thank you and goodbye.",
       "template": "That is a fair concern. The useful question is whether the underlying fit is strong enough to justify a next step. What would you need to see to decide that?"
     }
   }
